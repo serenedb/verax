@@ -152,9 +152,11 @@ class ConstantExpr : public Expr {
  public:
   ConstantExpr(const TypePtr& type, Variant value)
       : Expr(ExprKind::kConstant, type, {}), value_{std::move(value)} {
-    if (!isNull()) {
-      VELOX_USER_CHECK(type->kindEquals(value_.inferType()));
-    }
+    VELOX_USER_CHECK(
+        value_.isTypeCompatible(type),
+        "Constant value doesn't match its type: {} vs. {}",
+        type->toString(),
+        value_.inferType()->toString());
   }
 
   const Variant& value() const {
@@ -331,6 +333,8 @@ enum class SpecialForm {
   /// conditions are true, returns the result of evaluating the else clause or
   /// NULL if the else clause is not specified.
   kSwitch = 8,
+
+  kStar = 9,
 
   // TODO Add IN and EXISTS.
 };

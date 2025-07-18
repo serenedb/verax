@@ -90,6 +90,7 @@ folly::F14FastMap<SpecialForm, std::string> specialFormNames() {
       {SpecialForm::kCoalesce, "COALESCE"},
       {SpecialForm::kIf, "IF"},
       {SpecialForm::kSwitch, "SWITCH"},
+      {SpecialForm::kStar, "STAR"},
   };
 }
 } // namespace
@@ -255,6 +256,10 @@ SpecialFormExpr::SpecialFormExpr(
     case SpecialForm::kSwitch:
       validateSwitchInputs(type, inputs);
       break;
+    case SpecialForm::kStar:
+      VELOX_USER_CHECK_GE(
+          inputs.size(), 0, "'*' expression cannot not have any inputs");
+      break;
   }
 }
 
@@ -269,7 +274,7 @@ CallExpr::CallExpr(
 
   VELOX_USER_CHECK(
       !kReservedNames.contains(boost::algorithm::to_upper_copy(name)),
-      "Function name cannot match special for name: {}",
+      "Function name cannot match special form name: {}",
       name);
 }
 

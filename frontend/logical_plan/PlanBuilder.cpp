@@ -326,28 +326,21 @@ ExprPtr tryResolveSpecialForm(
   }
 
   if (name == "try") {
-    VELOX_USER_CHECK_EQ(resolvedInputs.size(), 1, "TRY must have one argument");
     return std::make_shared<SpecialFormExpr>(
         resolvedInputs.at(0)->type(), SpecialForm::kTry, resolvedInputs);
   }
 
   if (name == "coalesce") {
-    VELOX_USER_CHECK_GE(
-        resolvedInputs.size(), 2, "COALESCE must have at least two arguments");
     return std::make_shared<SpecialFormExpr>(
         resolvedInputs.at(0)->type(), SpecialForm::kCoalesce, resolvedInputs);
   }
 
   if (name == "if") {
-    VELOX_USER_CHECK_GE(
-        resolvedInputs.size(), 2, "IF must have at least two arguments");
     return std::make_shared<SpecialFormExpr>(
         resolvedInputs.at(1)->type(), SpecialForm::kIf, resolvedInputs);
   }
 
   if (name == "switch") {
-    VELOX_USER_CHECK_GE(
-        resolvedInputs.size(), 2, "SWITCH must have at least two arguments");
     return std::make_shared<SpecialFormExpr>(
         resolvedInputs.at(1)->type(), SpecialForm::kSwitch, resolvedInputs);
   }
