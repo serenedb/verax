@@ -14,23 +14,22 @@
  * limitations under the License.
  */
 
+#include "axiom/logical_plan/ExprPrinter.h"
+#include "axiom/logical_plan/PlanPrinter.h"
 #include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/PlanUtils.h"
 #include "velox/exec/Aggregate.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/expression/FunctionSignature.h"
-#include "velox/expression/SignatureBinder.h"
 
 namespace facebook::velox::optimizer {
-
-using namespace facebook::velox;
 
 namespace lp = facebook::velox::logical_plan;
 
 void Optimization::setDerivedTableOutput(
     DerivedTableP dt,
-    const velox::logical_plan::LogicalPlanNode& planNode) {
+    const lp::LogicalPlanNode& planNode) {
   auto& outputType = planNode.outputType();
   for (auto i = 0; i < outputType->size(); ++i) {
     auto fieldType = outputType->childAt(i);

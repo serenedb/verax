@@ -16,9 +16,7 @@
 
 #pragma once
 
-#include "axiom/logical_plan/ExprPrinter.h"
-#include "axiom/logical_plan/LogicalPlanNode.h"
-#include "axiom/logical_plan/PlanPrinter.h"
+#include "axiom/logical_plan/Expr.h"
 #include "axiom/optimizer/Schema.h"
 #include "velox/core/PlanNode.h"
 
@@ -990,8 +988,8 @@ struct DerivedTable : public PlanObject {
   // Finds single row dts from non-correlated scalar subqueries.
   void findSingleRowDts();
 
-  // Sets 'columns' abd 'exprs'.
-  void makeProjection(ExprVector exprs);
+  // Sets 'columns' and 'exprs'.
+  void makeProjection(const ExprVector& exprs);
 };
 
 using DerivedTableP = DerivedTable*;

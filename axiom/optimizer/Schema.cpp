@@ -15,10 +15,8 @@
  */
 
 #include "axiom/optimizer/Schema.h"
-#include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/PlanUtils.h"
-#include "velox/common/base/SimdUtil.h"
-#include "velox/common/base/SuccinctPrinter.h"
+#include "axiom/optimizer/RelationOp.h"
 
 namespace facebook::velox::optimizer {
 
@@ -84,7 +82,7 @@ ColumnCP SchemaTable::findColumn(const std::string& name) const {
 
 Schema::Schema(
     const char* _name,
-    std::vector<SchemaTableCP> tables,
+    const std::vector<SchemaTableCP>& tables,
     LocusCP locus)
     : name_(_name), defaultLocus_(locus) {
   for (auto& table : tables) {

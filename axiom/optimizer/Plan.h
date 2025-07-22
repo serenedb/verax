@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include "axiom/logical_plan/LogicalPlanNode.h"
 #include "axiom/optimizer/Cost.h"
 #include "axiom/optimizer/RelationOp.h"
 #include "velox/connectors/Connector.h"
@@ -159,16 +160,16 @@ struct LogicalPlanSubfields {
 /// Struct for resolving which PlanNode or Lambda defines which
 /// FieldAccessTypedExpr for column and subfield tracking.
 struct ContextSource {
-  const core::PlanNode* planNode;
-  const core::CallTypedExpr* call;
+  const core::PlanNode* planNode{nullptr};
+  const core::CallTypedExpr* call{nullptr};
   int32_t lambdaOrdinal{-1};
 };
 
 /// Struct for resolving which logical PlanNode or Lambda defines which
 /// field for column and subfield tracking.
 struct LogicalContextSource {
-  const logical_plan::LogicalPlanNode* planNode;
-  const logical_plan::CallExpr* call;
+  const logical_plan::LogicalPlanNode* planNode{nullptr};
+  const logical_plan::CallExpr* call{nullptr};
   int32_t lambdaOrdinal{-1};
 };
 

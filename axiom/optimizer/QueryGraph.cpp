@@ -17,8 +17,6 @@
 #include "axiom/optimizer/QueryGraph.h"
 #include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/PlanUtils.h"
-#include "velox/common/base/SimdUtil.h"
-#include "velox/common/base/SuccinctPrinter.h"
 #include "velox/expression/ScopedVarSetter.h"
 
 namespace facebook::velox::optimizer {
@@ -214,8 +212,8 @@ std::pair<std::string, bool> JoinEdge::sampleKey() const {
   auto right =
       fmt::format("{} ", rightTable_->as<BaseTable>()->schemaTable->name);
   for (auto i : indices) {
-    left = left + leftKeys_[i]->toString() + " ";
-    right = right + rightKeys_[i]->toString() + " ";
+    left += leftKeys_[i]->toString() + " ";
+    right += rightKeys_[i]->toString() + " ";
   }
   if (left < right) {
     return std::make_pair(left + " " + right, false);
@@ -554,7 +552,7 @@ void DerivedTable::linkTablesToJoins() {
 
 // Returns a right exists (semijoin) with 'table' on the left and one of
 // 'tables' on the right.
-JoinEdgeP makeExists(PlanObjectCP table, PlanObjectSet tables) {
+JoinEdgeP makeExists(PlanObjectCP table, const PlanObjectSet& tables) {
   for (auto join : joinedBy(table)) {
     if (join->leftTable() == table) {
       if (!tables.contains(join->rightTable())) {
@@ -757,7 +755,7 @@ PlanObjectCP otherSide(JoinEdgeP join, PlanObjectCP side) {
   return nullptr;
 }
 
-bool isProjected(PlanObjectCP table, PlanObjectSet columns) {
+bool isProjected(PlanObjectCP table, const PlanObjectSet& columns) {
   bool projected = false;
   columns.forEach([&](PlanObjectCP column) {
     projected |= column->as<Column>()->relation() == table;
@@ -776,8 +774,8 @@ bool isUnique(JoinEdgeP join, PlanObjectCP side) {
 PlanObjectCP nextJoin(
     PlanObjectCP start,
     const JoinEdgeVector& joins,
-    PlanObjectSet columns,
-    PlanObjectSet visited,
+    const PlanObjectSet& columns,
+    const PlanObjectSet& visited,
     bool& fullyImported) {
   for (auto& join : joins) {
     auto other = otherSide(join, start);
@@ -798,7 +796,7 @@ PlanObjectCP nextJoin(
 void joinChain(
     PlanObjectCP start,
     const JoinEdgeVector& joins,
-    PlanObjectSet columns,
+    const PlanObjectSet& columns,
     PlanObjectSet visited,
     bool& fullyImported,
     std::vector<PlanObjectCP>& path) {
@@ -849,7 +847,7 @@ void eraseFirst(V& set, E element) {
   }
 }
 
-void DerivedTable::makeProjection(ExprVector exprs) {
+void DerivedTable::makeProjection(const ExprVector& exprs) {
   auto optimization = queryCtx()->optimization();
   for (auto& expr : exprs) {
     auto* column =
@@ -972,7 +970,7 @@ void DerivedTable::flattenDt(const DerivedTable* dt) {
 }
 
 void BaseTable::addFilter(ExprCP expr) {
-  auto columns = expr->columns();
+  const auto& columns = expr->columns();
   bool isMultiColumn = false;
   bool isSingleColumn = false;
   columns.forEach([&](PlanObjectCP object) {

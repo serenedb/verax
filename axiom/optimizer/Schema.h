@@ -193,8 +193,8 @@ struct Distribution {
   Distribution copyWithOrder(ExprVector order, OrderTypeVector orderType)
       const {
     Distribution copy = *this;
-    copy.order = order;
-    copy.orderType = orderType;
+    copy.order = std::move(order);
+    copy.orderType = std::move(orderType);
     return copy;
   }
 
@@ -322,7 +322,7 @@ struct ColumnGroup : public Relation {
       Distribution distribution,
       const ColumnVector& _columns,
       const connector::TableLayout* layout = nullptr)
-      : Relation(RelType::kBase, distribution, _columns),
+      : Relation(RelType::kBase, std::move(distribution), _columns),
         name(_name),
         table(_table),
         layout(layout) {}
@@ -443,7 +443,7 @@ struct SchemaTable {
 class Schema {
  public:
   /// Constructs a testing schema without SchemaResolver.
-  Schema(Name _name, std::vector<SchemaTableCP> tables, LocusCP locus);
+  Schema(Name _name, const std::vector<SchemaTableCP>& tables, LocusCP locus);
 
   /// Constructs a Schema for producing executable plans, backed by 'source'.
   Schema(Name _name, SchemaResolver* source, LocusCP locus);

@@ -19,7 +19,6 @@
 #include <string>
 
 #include "axiom/optimizer/connectors/ConnectorMetadata.h"
-#include "velox/vector/ComplexVector.h"
 
 namespace facebook::velox::optimizer {
 
