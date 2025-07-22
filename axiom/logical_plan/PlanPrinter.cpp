@@ -105,7 +105,8 @@ class ToTextVisitor : public PlanNodeVisitor {
     appendNode(
         fmt::format("Join {}", JoinTypeName::toName(node.joinType())),
         node,
-        ExprPrinter::toText(*node.condition()),
+        node.condition() != nullptr ? ExprPrinter::toText(*node.condition())
+                                    : "",
         context);
   }
 

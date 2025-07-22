@@ -184,6 +184,48 @@ TEST_F(PlanPrinterTest, join) {
           testing::Eq("")));
 }
 
+TEST_F(PlanPrinterTest, crossJoin) {
+  auto leftType = ROW({"key", "v"}, {INTEGER(), INTEGER()});
+  std::vector<Variant> leftData{
+      Variant::row({1, 10}),
+      Variant::row({2, 20}),
+      Variant::row({3, 30}),
+  };
+
+  auto rightType = ROW({"key", "w"}, {INTEGER(), INTEGER()});
+  std::vector<Variant> rightData{
+      Variant::row({1, 11}),
+      Variant::row({2, 22}),
+  };
+
+  PlanBuilder::Context context;
+  auto plan = PlanBuilder(context)
+                  .values(leftType, leftData)
+                  .as("l")
+                  .join(
+                      PlanBuilder(context).values(rightType, rightData).as("r"),
+                      "",
+                      JoinType::kInner)
+                  .with({"l.v + r.w as z"})
+                  .build();
+
+  const auto lines = toLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::StartsWith("- Project"),
+          testing::StartsWith("    key := key"),
+          testing::StartsWith("    v := v"),
+          testing::StartsWith("    key_0 := key_0"),
+          testing::StartsWith("    w := w"),
+          testing::StartsWith("    z := plus(v, w)"),
+          testing::StartsWith("  - Join INNER:"), // Condition is empty
+          testing::StartsWith("    - Values: 3 rows"),
+          testing::StartsWith("    - Values: 2 rows"),
+          testing::Eq("")));
+}
+
 TEST_F(PlanPrinterTest, specialForms) {
   auto rowType =
       ROW({"a", "b", "c"},

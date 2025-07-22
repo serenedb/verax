@@ -701,11 +701,15 @@ PlanBuilder& PlanBuilder::join(
 
   auto inputRowType = node_->outputType()->unionWith(right.node_->outputType());
 
-  auto untypedExpr = parse::parseExpr(condition, parseOptions_);
-  auto expr = resolveScalarTypesImpl(
-      untypedExpr, [&](const auto& alias, const auto& name) {
-        return resolveJoinInputName(alias, name, *outputMapping_, inputRowType);
-      });
+  ExprPtr expr;
+  if (!condition.empty()) {
+    auto untypedExpr = parse::parseExpr(condition, parseOptions_);
+    expr = resolveScalarTypesImpl(
+        untypedExpr, [&](const auto& alias, const auto& name) {
+          return resolveJoinInputName(
+              alias, name, *outputMapping_, inputRowType);
+        });
+  }
 
   node_ =
       std::make_shared<JoinNode>(nextId(), node_, right.node_, joinType, expr);
