@@ -358,7 +358,7 @@ ExprPtr tryResolveSpecialForm(
     const auto index =
         fieldExpr->asUnchecked<ConstantExpr>()->value()->value<int64_t>();
 
-    VELOX_USER_CHECK_GT(index, 1);
+    VELOX_USER_CHECK_GE(index, 1);
     VELOX_USER_CHECK_LE(index, rowType.size());
 
     const int32_t zeroBasedIndex = index - 1;
