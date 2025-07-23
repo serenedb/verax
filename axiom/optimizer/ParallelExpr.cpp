@@ -14,10 +14,8 @@
  * limitations under the License.
  */
 
-#include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/ParallelProject.h"
 #include "axiom/optimizer/Plan.h"
-#include "axiom/optimizer/PlanUtils.h"
 #include "velox/core/Expressions.h"
 
 namespace facebook::velox::optimizer {
@@ -157,11 +155,7 @@ core::PlanNodePtr Optimization::makeParallelProject(
     }
   });
   return std::make_shared<exec::ParallelProjectNode>(
-      idGenerator().next(),
-      std::move(names),
-      std::move(groups),
-      std::move(extra),
-      input);
+      nextId(), std::move(names), std::move(groups), std::move(extra), input);
 }
 
 // Returns the columns used by Exprs in 'top', excluding columns only referenced
@@ -319,7 +313,7 @@ core::PlanNodePtr Optimization::maybeParallelProject(
     finalExprs.push_back(toTypedExpr(exprs[i]));
   }
   return std::make_shared<core::ProjectNode>(
-      idGenerator().next(), std::move(names), std::move(finalExprs), input);
+      nextId(), std::move(names), std::move(finalExprs), input);
 }
 
 } // namespace facebook::velox::optimizer

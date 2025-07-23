@@ -182,7 +182,7 @@ void filterUpdated(BaseTableCP table, bool updateSelectivity) {
   }
 }
 
-core::PlanNodeId Optimization::nextId(const RelationOp& op) {
+core::PlanNodeId Optimization::nextId() {
   return idGenerator_.next();
 }
 
@@ -424,7 +424,7 @@ class TempProjections {
       return inputNode;
     }
     return std::make_shared<core::ProjectNode>(
-        optimization_.idGenerator().next(),
+        optimization_.nextId(),
         std::move(names_),
         std::move(exprs_),
         inputNode);
@@ -468,10 +468,10 @@ core::PlanNodePtr Optimization::makeOrderBy(
   core::PlanNodePtr orderByNode;
   if (toVeloxLimit_ <= 0) {
     orderByNode = std::make_shared<core::OrderByNode>(
-        nextId(op), keys, sortOrder, true, project);
+        nextId(), keys, sortOrder, true, project);
   } else {
     orderByNode = std::make_shared<core::TopNNode>(
-        nextId(op),
+        nextId(),
         keys,
         sortOrder,
         toVeloxLimit_ + toVeloxOffset_,
@@ -506,7 +506,7 @@ core::PlanNodePtr Optimization::makeOrderBy(
   stages.push_back(std::move(source));
   if (toVeloxLimit_ > 0 || toVeloxOffset_ != 0) {
     return std::make_shared<core::LimitNode>(
-        idGenerator().next(), toVeloxOffset_, toVeloxLimit_, false, merge);
+        nextId(), toVeloxOffset_, toVeloxLimit_, false, merge);
   }
   return merge;
 }
@@ -723,7 +723,7 @@ velox::core::PlanNodePtr Optimization::makeScan(
   }
 
   auto scanNode = std::make_shared<core::TableScanNode>(
-      nextId(scan), outputType, handlePair.first, assignments);
+      nextId(), outputType, handlePair.first, assignments);
   VELOX_CHECK(handlePair.second.empty(), "Expecting no rejected filters");
   makePredictionAndHistory(scanNode->id(), &scan);
   fragment.scans.push_back(scanNode);
@@ -766,7 +766,7 @@ velox::core::PlanNodePtr Optimization::makeProject(
     exprs.push_back(toTypedExpr(project.exprs()[i]));
   }
   return std::make_shared<core::ProjectNode>(
-      nextId(project), std::move(names), std::move(exprs), input);
+      nextId(), std::move(names), std::move(exprs), input);
 }
 
 velox::core::PlanNodePtr Optimization::makeJoin(
@@ -779,7 +779,7 @@ velox::core::PlanNodePtr Optimization::makeJoin(
   auto right = makeFragment(join.right, fragment, stages);
   if (join.method == JoinMethod::kCross) {
     auto joinNode = std::make_shared<core::NestedLoopJoinNode>(
-        nextId(join),
+        nextId(),
         join.joinType,
         nullptr,
         leftProjections.maybeProject(left),
@@ -790,13 +790,13 @@ velox::core::PlanNodePtr Optimization::makeJoin(
       return joinNode;
     }
     return std::make_shared<core::FilterNode>(
-        idGenerator().next(), toAnd(join.filter), joinNode);
+        nextId(), toAnd(join.filter), joinNode);
   }
 
   auto leftKeys = leftProjections.toFieldRefs(join.leftKeys);
   auto rightKeys = rightProjections.toFieldRefs(join.rightKeys);
   auto joinNode = std::make_shared<core::HashJoinNode>(
-      nextId(join),
+      nextId(),
       join.joinType,
       false,
       leftKeys,
@@ -867,7 +867,7 @@ core::PlanNodePtr Optimization::makeAggregation(
           createPartitionFunctionSpec(project->outputType(), keys, false);
       std::vector<core::PlanNodePtr> inputs = {project};
       project = std::make_shared<core::LocalPartitionNode>(
-          nextId(op),
+          nextId(),
           core::LocalPartitionNode::Type::kGather,
           false,
           std::move(partition),
@@ -878,7 +878,7 @@ core::PlanNodePtr Optimization::makeAggregation(
           createPartitionFunctionSpec(project->outputType(), keys, false);
       std::vector<core::PlanNodePtr> inputs = {project};
       project = std::make_shared<core::LocalPartitionNode>(
-          nextId(op),
+          nextId(),
           core::LocalPartitionNode::Type::kRepartition,
           false,
           std::move(partition),
@@ -887,7 +887,7 @@ core::PlanNodePtr Optimization::makeAggregation(
   }
 
   return std::make_shared<core::AggregationNode>(
-      nextId(op),
+      nextId(),
       op.step,
       keys,
       std::vector<core::FieldAccessTypedExprPtr>{},
@@ -920,7 +920,7 @@ velox::core::PlanNodePtr Optimization::makeRepartition(
     source.numBroadcastDestinations = options_.numWorkers;
   }
   source.fragment.planNode = std::make_shared<core::PartitionedOutputNode>(
-      nextId(repartition),
+      nextId(),
       distribution.isBroadcast
           ? core::PartitionedOutputNode::Kind::kBroadcast
           : core::PartitionedOutputNode::Kind::kPartitioned,
@@ -936,7 +936,7 @@ velox::core::PlanNodePtr Optimization::makeRepartition(
       idGenerator_.next(),
       sourcePlan->outputType(),
       VectorSerde::Kind::kPresto);
-  fragment.inputStages.push_back(InputStage{exchange->id(), source.taskPrefix});
+  fragment.inputStages.emplace_back(exchange->id(), source.taskPrefix);
   stages.push_back(std::move(source));
   return exchange;
 }

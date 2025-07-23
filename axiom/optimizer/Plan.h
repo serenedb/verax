@@ -450,7 +450,7 @@ struct PlanStateSaver {
         numBuilds_(state.builds.size()),
         numPlaced_(state.dbgPlacedTables.size()) {}
 
-  explicit PlanStateSaver(PlanState& state, const JoinCandidate& candidate);
+  PlanStateSaver(PlanState& state, const JoinCandidate& candidate);
 
   ~PlanStateSaver() {
     state_.placed = std::move(placed_);
@@ -537,6 +537,7 @@ struct BuiltinNames {
   BuiltinNames();
 
   Name reverse(Name op) const;
+
   bool isCanonicalizable(Name name) const {
     return canonicalizable.find(name) != canonicalizable.end();
   }
@@ -600,8 +601,8 @@ class Optimization {
 
   void setLeafHandle(
       int32_t id,
-      connector::ConnectorTableHandlePtr handle,
-      std::vector<core::TypedExprPtr> extraFilters) {
+      const connector::ConnectorTableHandlePtr& handle,
+      const std::vector<core::TypedExprPtr>& extraFilters) {
     leafHandles_[id] = std::make_pair(handle, extraFilters);
   }
 
@@ -618,9 +619,8 @@ class Optimization {
   // Translates from Expr to Velox.
   velox::core::TypedExprPtr toTypedExpr(ExprCP expr);
 
-  auto& idGenerator() {
-    return idGenerator_;
-  }
+  // Returns a new PlanNodeId.
+  velox::core::PlanNodeId nextId();
 
   // Makes a getter path over a top level column and can convert the top map
   // getter into struct getter if maps extracted as structs.
@@ -1231,9 +1231,6 @@ class Optimization {
   void makePredictionAndHistory(
       const core::PlanNodeId& id,
       const RelationOp* op);
-
-  // Returns a new PlanNodeId and associates the Cost of 'op' with it.
-  velox::core::PlanNodeId nextId(const RelationOp& op);
 
   // Returns a stack of parallel project nodes if parallelization makes sense.
   // nullptr means use regular ProjectNode in output.
