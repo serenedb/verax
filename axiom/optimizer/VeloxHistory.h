@@ -18,7 +18,6 @@
 
 #include "axiom/optimizer/Plan.h"
 #include "velox/exec/TaskStats.h"
-#include "velox/runner/MultiFragmentPlan.h"
 
 namespace facebook::velox::optimizer {
 

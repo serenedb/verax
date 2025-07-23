@@ -16,19 +16,47 @@
 
 #include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/Plan.h"
-#include "axiom/optimizer/PlanUtils.h"
 #include "velox/exec/Aggregate.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/expression/FunctionSignature.h"
-#include "velox/expression/SignatureBinder.h"
 
 namespace facebook::velox::optimizer {
 
 using namespace facebook::velox;
 
+namespace {
 std::string veloxToString(const core::PlanNode* plan) {
   return plan->toString(true, true);
 }
+
+const std::string* columnName(const core::TypedExprPtr& expr) {
+  if (auto column =
+          dynamic_cast<const core::FieldAccessTypedExpr*>(expr.get())) {
+    if (column->inputs().empty() ||
+        dynamic_cast<const core::InputTypedExpr*>(column->inputs()[0].get())) {
+      return &column->name();
+    }
+  }
+  return nullptr;
+}
+
+bool isCall(const core::TypedExprPtr& expr, const std::string& name) {
+  if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expr)) {
+    return exec::sanitizeName(call->name()) == name;
+  }
+  return false;
+}
+
+template <TypeKind kind>
+const variant* toVariant(BaseVector& constantVector) {
+  using T = typename TypeTraits<kind>::NativeType;
+  if (auto typed = dynamic_cast<ConstantVector<T>*>(&constantVector)) {
+    return queryCtx()->registerVariant(
+        std::make_unique<variant>(typed->valueAt(0)));
+  }
+  VELOX_FAIL("Literal not of foldable type");
+}
+} // namespace
 
 void Optimization::setDerivedTableOutput(
     DerivedTableP dt,
@@ -56,24 +84,6 @@ DerivedTableP Optimization::makeQueryGraph() {
   return root_;
 }
 
-const std::string* columnName(const core::TypedExprPtr& expr) {
-  if (auto column =
-          dynamic_cast<const core::FieldAccessTypedExpr*>(expr.get())) {
-    if (column->inputs().empty() ||
-        dynamic_cast<const core::InputTypedExpr*>(column->inputs()[0].get())) {
-      return &column->name();
-    }
-  }
-  return nullptr;
-}
-
-bool isCall(const core::TypedExprPtr& expr, const std::string& name) {
-  if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expr)) {
-    return exec::sanitizeName(call->name()) == name;
-  }
-  return false;
-}
-
 void Optimization::translateConjuncts(
     const core::TypedExprPtr& input,
     ExprVector& flat) {
@@ -87,16 +97,6 @@ void Optimization::translateConjuncts(
   } else {
     flat.push_back(translateExpr(input));
   }
-}
-
-template <TypeKind kind>
-const variant* toVariant(BaseVector& constantVector) {
-  using T = typename TypeTraits<kind>::NativeType;
-  if (auto typed = dynamic_cast<ConstantVector<T>*>(&constantVector)) {
-    return queryCtx()->registerVariant(
-        std::make_unique<variant>(typed->valueAt(0)));
-  }
-  VELOX_FAIL("Literal not of foldable type");
 }
 
 ExprCP Optimization::tryFoldConstant(
@@ -260,6 +260,7 @@ void Optimization::getExprForField(
   }
 }
 
+namespace {
 bool isLeafField(const core::ITypedExpr* expr) {
   if (auto* field = dynamic_cast<const core::FieldAccessTypedExpr*>(expr)) {
     if (field->inputs().empty() ||
@@ -269,6 +270,7 @@ bool isLeafField(const core::ITypedExpr* expr) {
   }
   return false;
 }
+} // namespace
 
 std::optional<ExprCP> Optimization::translateSubfield(
     const core::TypedExprPtr& inputExpr) {
@@ -419,6 +421,7 @@ ExprCP Optimization::makeGettersOverSkyline(
   return expr;
 }
 
+namespace {
 std::optional<BitSet> findSubfields(
     const PlanSubfields& fields,
     const core::CallTypedExpr* call) {
@@ -426,13 +429,15 @@ std::optional<BitSet> findSubfields(
   if (it == fields.argFields.end()) {
     return std::nullopt;
   }
-  auto& paths = it->second.resultPaths;
+
+  const auto& paths = it->second.resultPaths;
   auto it2 = paths.find(ResultAccess::kSelf);
   if (it2 == paths.end()) {
     return {};
   }
   return it2->second;
 }
+} // namespace
 
 BitSet Optimization::functionSubfields(
     const core::CallTypedExpr* call,
@@ -659,6 +664,8 @@ ExprVector Optimization::translateColumns(
   return result;
 }
 
+namespace {
+
 TypePtr intermediateType(const core::CallTypedExprPtr& call) {
   std::vector<TypePtr> types;
   for (auto& arg : call->inputs()) {
@@ -675,6 +682,7 @@ TypePtr finalType(const core::CallTypedExprPtr& call) {
   }
   return exec::Aggregate::finalType(exec::sanitizeName(call->name()), types);
 }
+} // namespace
 
 AggregationP Optimization::translateAggregation(
     const core::AggregationNode& source) {
@@ -893,6 +901,8 @@ void Optimization::translateNonEqualityJoin(
   }
 }
 
+namespace {
+
 bool isJoin(const core::PlanNode& node) {
   auto name = node.name();
   if (name == "HashJoin" || name == "MergeJoin" || name == "NestedLoopJoin") {
@@ -911,6 +921,7 @@ bool isDirectOver(const core::PlanNode& node, const std::string& name) {
   }
   return false;
 }
+} // namespace
 
 PlanObjectP Optimization::wrapInDt(const core::PlanNode& node) {
   DerivedTableP previousDt = currentSelect_;
@@ -995,12 +1006,10 @@ PlanObjectP Optimization::makeBaseTable(const core::TableScanNode* tableScan) {
   return baseTable;
 }
 
-const Type* pathType(const Type* type, PathCP path);
-
 void Optimization::addProjection(const core::ProjectNode* project) {
   exprSource_ = project->sources()[0].get();
-  auto names = project->names();
-  auto exprs = project->projections();
+  const auto& names = project->names();
+  const auto& exprs = project->projections();
   for (auto i : usedChannels(project)) {
     if (auto field = dynamic_cast<const core::FieldAccessTypedExpr*>(
             exprs.at(i).get())) {

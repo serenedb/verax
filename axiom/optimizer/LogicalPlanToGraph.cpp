@@ -53,12 +53,25 @@ DerivedTableP Optimization::makeQueryGraphFromLogical() {
   return root_;
 }
 
+namespace {
+
 const std::string* columnName(const lp::Expr& expr) {
   if (expr.isInputReference()) {
     return &expr.asUnchecked<lp::InputReferenceExpr>()->name();
   }
   return nullptr;
 }
+
+template <TypeKind kind>
+std::shared_ptr<const variant> toVariant(BaseVector& constantVector) {
+  using T = typename TypeTraits<kind>::NativeType;
+  if (auto typed = dynamic_cast<ConstantVector<T>*>(&constantVector)) {
+    return std::make_shared<Variant>(typed->valueAt(0));
+  }
+  VELOX_FAIL("Literal not of foldable type");
+}
+
+} // namespace
 
 void Optimization::translateConjuncts(
     const lp::ExprPtr& input,
@@ -73,15 +86,6 @@ void Optimization::translateConjuncts(
   } else {
     flat.push_back(translateExpr(input));
   }
-}
-
-template <TypeKind kind>
-std::shared_ptr<const variant> toVariant(BaseVector& constantVector) {
-  using T = typename TypeTraits<kind>::NativeType;
-  if (auto typed = dynamic_cast<ConstantVector<T>*>(&constantVector)) {
-    return std::make_shared<Variant>(typed->valueAt(0));
-  }
-  VELOX_FAIL("Literal not of foldable type");
 }
 
 std::shared_ptr<const exec::ConstantExpr> Optimization::foldConstant(
@@ -226,26 +230,13 @@ void Optimization::getExprForField(
       resultColumn = maybeColumn->as<Column>();
       resultExpr = nullptr;
       context = nullptr;
-#if 0
-      auto internedName = toName(name);
-      if (auto* table = dynamic_cast<BaseTableCP>(leaf)) {
-	for (auto i = 0; i < table->columns.size(); ++i) {
-          if (table->columns[i]->name() == internedName) {
-            resultColumn = table->columns[i];
-            break;
-          }
-        }
-    } else {
-        VELOX_NYI("Leaf node is not a table");
-      }
-#else
       VELOX_CHECK_NOT_NULL(resultColumn->relation());
       if (resultColumn->relation()->type() == PlanType::kTable) {
         VELOX_CHECK(leaf == resultColumn->relation());
       }
-#endif
       return;
     }
+
     for (auto i = 0; i < sources.size(); ++i) {
       auto& row = sources[i]->outputType();
       auto maybe = row->getChildIdxIfExists(name);
@@ -428,6 +419,7 @@ ExprCP Optimization::makeGettersOverSkyline(
   return expr;
 }
 
+namespace {
 std::optional<BitSet> findSubfields(
     const LogicalPlanSubfields& fields,
     const lp::CallExpr* call) {
@@ -442,6 +434,7 @@ std::optional<BitSet> findSubfields(
   }
   return it2->second;
 }
+} // namespace
 
 BitSet Optimization::functionSubfields(
     const lp::CallExpr* call,
@@ -570,6 +563,7 @@ ExprCP Optimization::makeConstant(const lp::ConstantExpr& constant) {
   return literal;
 }
 
+namespace {
 const char* specialFormCallName(const lp::SpecialFormExpr* form) {
   switch (form->form()) {
     case lp::SpecialForm::kAnd:
@@ -591,6 +585,7 @@ const char* specialFormCallName(const lp::SpecialFormExpr* form) {
           "Bad special form {}", static_cast<int32_t>(form->form()));
   }
 }
+} // namespace
 
 ExprCP Optimization::translateExpr(const lp::ExprPtr& expr) {
   if (auto name = columnName(*expr)) {
@@ -908,6 +903,8 @@ void Optimization::translateJoin(const lp::JoinNode& join) {
   }
 }
 
+namespace {
+
 bool isJoin(const lp::LogicalPlanNode& node) {
   auto kind = node.kind();
   if (kind == lp::NodeKind::kJoin) {
@@ -923,6 +920,7 @@ bool isDirectOver(const lp::LogicalPlanNode& node, lp::NodeKind kind) {
   auto source = node.inputAt(0);
   return source && source->kind() == kind;
 }
+} // namespace
 
 PlanObjectP Optimization::wrapInDt(const lp::LogicalPlanNode& node) {
   DerivedTableP previousDt = currentSelect_;
@@ -1007,6 +1005,7 @@ PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode* tableScan) {
   return baseTable;
 }
 
+namespace {
 const Type* pathType(const Type* type, PathCP path) {
   for (auto& step : path->steps()) {
     switch (step.kind) {
@@ -1028,6 +1027,7 @@ const Type* pathType(const Type* type, PathCP path) {
   }
   return type;
 }
+} // namespace
 
 void Optimization::makeSubfieldColumns(
     BaseTable* baseTable,
@@ -1053,8 +1053,8 @@ void Optimization::makeSubfieldColumns(
 
 void Optimization::addProjection(const lp::ProjectNode* project) {
   logicalExprSource_ = project->inputAt(0).get();
-  auto names = project->names();
-  auto exprs = project->expressions();
+  const auto& names = project->names();
+  const auto& exprs = project->expressions();
   for (auto i : usedChannels(project)) {
     if (exprs[i]->isInputReference()) {
       auto name = exprs[i]->asUnchecked<lp::InputReferenceExpr>()->name();
@@ -1102,6 +1102,7 @@ PlanObjectP Optimization::addAggregation(
   return currentSelect_;
 }
 
+namespace {
 bool hasNondeterministic(const lp::ExprPtr& expr) {
   if (auto* call = dynamic_cast<const lp::CallExpr*>(expr.get())) {
     if (functionBits(toName(call->name()))
@@ -1116,6 +1117,7 @@ bool hasNondeterministic(const lp::ExprPtr& expr) {
   }
   return false;
 }
+} // namespace
 
 PlanObjectP Optimization::makeQueryGraph(
     const lp::LogicalPlanNode& node,

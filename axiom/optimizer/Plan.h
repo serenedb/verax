@@ -617,6 +617,7 @@ class Optimization {
 
   // Translates from Expr to Velox.
   velox::core::TypedExprPtr toTypedExpr(ExprCP expr);
+
   auto& idGenerator() {
     return idGenerator_;
   }
@@ -630,7 +631,7 @@ class Optimization {
   // these in scanColumns. The scan->columns() is the leaf columns,
   // not the top level ones if subfield pushdown.
   RowTypePtr scanOutputType(
-      TableScan* scan,
+      TableScan& scan,
       ColumnVector& scanColumns,
       std::unordered_map<ColumnCP, TypePtr>& typeMap);
 
@@ -642,13 +643,13 @@ class Optimization {
 
   // Makes projections for subfields as top level columns.
   core::PlanNodePtr makeSubfieldProjections(
-      TableScan* scan,
+      TableScan& scan,
       const std::shared_ptr<const core::TableScanNode>& scanNode);
 
   /// Sets 'filterSelectivity' of 'baseTable' from history. Returns True if set.
   /// 'scanType' is the set of sampled columns with possible map to struct cast.
   bool setLeafSelectivity(BaseTable& baseTable, RowTypePtr scanType) {
-    return history_.setLeafSelectivity(baseTable, scanType);
+    return history_.setLeafSelectivity(baseTable, std::move(scanType));
   }
 
   auto& memo() {
@@ -1186,6 +1187,31 @@ class Optimization {
   // limit.
   velox::core::PlanNodePtr makeOrderBy(
       OrderBy& op,
+      velox::runner::ExecutableFragment& fragment,
+      std::vector<velox::runner::ExecutableFragment>& stages);
+
+  velox::core::PlanNodePtr makeScan(
+      TableScan& scan,
+      velox::runner::ExecutableFragment& fragment,
+      std::vector<velox::runner::ExecutableFragment>& stages);
+
+  velox::core::PlanNodePtr makeFilter(
+      Filter& filter,
+      velox::runner::ExecutableFragment& fragment,
+      std::vector<velox::runner::ExecutableFragment>& stages);
+
+  velox::core::PlanNodePtr makeProject(
+      Project& project,
+      velox::runner::ExecutableFragment& fragment,
+      std::vector<velox::runner::ExecutableFragment>& stages);
+
+  velox::core::PlanNodePtr makeJoin(
+      Join& join,
+      velox::runner::ExecutableFragment& fragment,
+      std::vector<velox::runner::ExecutableFragment>& stages);
+
+  velox::core::PlanNodePtr makeRepartition(
+      Repartition& repartition,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
