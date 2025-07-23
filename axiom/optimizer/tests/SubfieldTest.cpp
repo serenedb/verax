@@ -20,7 +20,7 @@
 #include "axiom/optimizer/tests/QueryTestBase.h"
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
-#include "velox/parse/Expressions.h"
+#include "velox/parse/TypeResolver.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
 
 DEFINE_string(subfield_data_path, "", "Path to subfield test data");
@@ -138,7 +138,7 @@ class SubfieldTest : public QueryTestBase,
       VELOX_CHECK(steps.front().kind == StepKind::kField);
       auto nth = steps.front().id;
       VELOX_CHECK_LE(nth, 3);
-      auto args = call->inputs();
+      const auto& args = call->inputs();
 
       // Here, for the sake of example, we make every odd key return identity.
       if (steps[1].id % 2 == 1) {

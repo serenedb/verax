@@ -20,14 +20,7 @@
 #include "axiom/optimizer/VeloxHistory.h"
 #include "axiom/optimizer/tests/ParquetTpchTest.h"
 #include "axiom/optimizer/tests/QueryTestBase.h"
-#include "axiom/optimizer/tests/Tpch.h"
-#include "velox/common/file/FileSystems.h"
-#include "velox/dwio/parquet/RegisterParquetReader.h"
 #include "velox/exec/tests/utils/TpchQueryBuilder.h"
-#include "velox/expression/Expr.h"
-#include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
-#include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/parse/TypeResolver.h"
 
 DEFINE_int32(num_repeats, 1, "Number of repeats for optimization timing");
 
@@ -92,10 +85,9 @@ class PlanTest : public virtual ParquetTpchTest, public virtual QueryTestBase {
       bool ordered,
       int numRepeats = FLAGS_num_repeats) {
     std::string planText;
-    std::string errorText;
     for (auto counter = 0; counter < numRepeats; ++counter) {
       optimizerOptions_.traceFlags = FLAGS_optimizer_trace;
-      auto result = planVelox(plan, &planText, &errorText);
+      auto result = planVelox(plan, &planText);
     }
     return fmt::format(
         "=== {} {}:\n{}\n",

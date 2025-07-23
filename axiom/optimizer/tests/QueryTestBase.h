@@ -20,8 +20,6 @@
 #include <gflags/gflags.h>
 #include "axiom/optimizer/SchemaResolver.h"
 #include "axiom/optimizer/VeloxHistory.h"
-#include "axiom/optimizer/connectors/hive/LocalHiveConnectorMetadata.h"
-#include "axiom/optimizer/tests/ParquetTpchTest.h"
 #include "velox/exec/tests/utils/LocalRunnerTestBase.h"
 #include "velox/parse/QueryPlanner.h"
 #include "velox/runner/LocalRunner.h"
@@ -43,9 +41,6 @@ struct TestResult {
 
   /// Human readable Verax  output.
   std::string planString;
-
-  /// Error message.
-  std::string errorString;
 
   std::vector<exec::TaskStats> stats;
 };
@@ -81,24 +76,20 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
 
   optimizer::PlanAndStats planSql(
       const std::string& sql,
-      std::string* planString = nullptr,
-      std::string* errorString = nullptr);
+      std::string* planString = nullptr);
 
   optimizer::PlanAndStats planVelox(
       const core::PlanNodePtr& plan,
-      std::string* planString = nullptr,
-      std::string* errorString = nullptr);
+      std::string* planString = nullptr);
 
   optimizer::PlanAndStats planVelox(
       const logical_plan::LogicalPlanNodePtr& plan,
-      std::string* planString = nullptr,
-      std::string* errorString = nullptr);
+      std::string* planString = nullptr);
 
   template <typename PlanPtr>
   optimizer::PlanAndStats planFromTree(
       const PlanPtr& plan,
-      std::string* planString,
-      std::string* errorString);
+      std::string* planString);
 
   std::string veloxString(const std::string& sql);
 

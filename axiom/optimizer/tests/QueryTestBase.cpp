@@ -16,12 +16,9 @@
 
 #include "axiom/optimizer/tests/QueryTestBase.h"
 
-#include "velox/connectors/hive/HiveConnector.h"
-#include "velox/dwio/common/Options.h"
+#include "axiom/optimizer/connectors/hive/LocalHiveConnectorMetadata.h"
 #include "velox/dwio/dwrf/RegisterDwrfReader.h"
-#include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/parquet/RegisterParquetReader.h"
-#include "velox/exec/Exchange.h"
 #include "velox/exec/tests/utils/DistributedPlanBuilder.h"
 #include "velox/exec/tests/utils/QueryAssertions.h"
 
@@ -102,12 +99,11 @@ void QueryTestBase::SetUp() {
       0,
       schemaQueryCtx_->queryConfig().sessionTimezone());
 
-  schema_ = std::make_shared<facebook::velox::optimizer::SchemaResolver>(
-      connector_, "");
+  schema_ = std::make_shared<velox::optimizer::SchemaResolver>(connector_, "");
   if (suiteHistory_) {
     history_ = std::move(suiteHistory_);
   } else {
-    history_ = std::make_unique<facebook::velox::optimizer::VeloxHistory>();
+    history_ = std::make_unique<velox::optimizer::VeloxHistory>();
   }
   optimizerOptions_ = OptimizerOptions();
   optimizerOptions_.traceFlags = FLAGS_optimizer_trace;
@@ -186,7 +182,7 @@ core::PlanNodePtr QueryTestBase::toTableScan(
 
 TestResult QueryTestBase::runSql(const std::string& sql) {
   TestResult result;
-  auto planAndStats = planSql(sql, &result.planString, &result.errorString);
+  auto planAndStats = planSql(sql, &result.planString);
   if (!planAndStats.plan) {
     return result;
   }
@@ -210,9 +206,8 @@ TestResult QueryTestBase::runFragmentedPlan(
     history_->recordVeloxExecution(fragmentedPlan, result.stats);
   } catch (const std::exception& e) {
     std::cerr << "Query terminated with: " << e.what() << std::endl;
-    result.errorString = fmt::format("Runtime error: {}", e.what());
     waitForCompletion(result.runner);
-    return result;
+    throw;
   }
   waitForCompletion(result.runner);
   return result;
@@ -220,26 +215,15 @@ TestResult QueryTestBase::runFragmentedPlan(
 
 optimizer::PlanAndStats QueryTestBase::planSql(
     const std::string& sql,
-    std::string* planString,
-    std::string* errorString) {
-  core::PlanNodePtr plan;
-  try {
-    plan = planner_->plan(sql);
-  } catch (std::exception& e) {
-    std::cerr << "parse error: " << e.what() << std::endl;
-    if (errorString) {
-      *errorString = fmt::format("Parse error: {}", e.what());
-    }
-    return {};
-  }
-  return planVelox(plan, planString, errorString);
+    std::string* planString) {
+  core::PlanNodePtr plan = planner_->plan(sql);
+  return planVelox(plan, planString);
 }
 
 template <typename PlanPtr>
 optimizer::PlanAndStats QueryTestBase::planFromTree(
     const PlanPtr& plan,
-    std::string* planString,
-    std::string* errorString) {
+    std::string* planString) {
   ++queryCounter_;
   std::unordered_map<std::string, std::shared_ptr<config::ConfigBase>>
       connectorConfigs;
@@ -262,58 +246,45 @@ optimizer::PlanAndStats QueryTestBase::planFromTree(
   opts.numDrivers = FLAGS_num_drivers;
   auto allocator = std::make_unique<HashStringAllocator>(optimizerPool_.get());
   auto context =
-      std::make_unique<facebook::velox::optimizer::QueryGraphContext>(
-          *allocator);
-  facebook::velox::optimizer::queryCtx() = context.get();
+      std::make_unique<velox::optimizer::QueryGraphContext>(*allocator);
+  velox::optimizer::queryCtx() = context.get();
+  SCOPE_EXIT {
+    velox::optimizer::queryCtx() = nullptr;
+  };
   exec::SimpleExpressionEvaluator evaluator(
       queryCtx_.get(), optimizerPool_.get());
-  optimizer::PlanAndStats planAndStats;
-  try {
-    facebook::velox::optimizer::Schema veraxSchema(
-        "test", schema_.get(), &locus);
-    facebook::velox::optimizer::Optimization opt(
-        *plan,
-        veraxSchema,
-        *history_,
-        queryCtx_,
-        evaluator,
-        optimizerOptions_,
-        opts);
-    auto best = opt.bestPlan();
-    if (planString) {
-      *planString = best->op->toString(true, false);
-    }
-    planAndStats = opt.toVeloxPlan(best->op, opts);
-  } catch (const std::exception& e) {
-    facebook::velox::optimizer::queryCtx() = nullptr;
-    std::cerr << "optimizer error: " << e.what() << std::endl;
-    if (errorString) {
-      *errorString = fmt::format("optimizer error: {}", e.what());
-    }
-    return {};
+
+  velox::optimizer::Schema veraxSchema("test", schema_.get(), &locus);
+  velox::optimizer::Optimization opt(
+      *plan,
+      veraxSchema,
+      *history_,
+      queryCtx_,
+      evaluator,
+      optimizerOptions_,
+      opts);
+  auto best = opt.bestPlan();
+  if (planString) {
+    *planString = best->op->toString(true, false);
   }
-  facebook::velox::optimizer::queryCtx() = nullptr;
-  return planAndStats;
+  return opt.toVeloxPlan(best->op, opts);
 }
 
 optimizer::PlanAndStats QueryTestBase::planVelox(
     const core::PlanNodePtr& plan,
-    std::string* planString,
-    std::string* errorString) {
-  return planFromTree(plan, planString, errorString);
+    std::string* planString) {
+  return planFromTree(plan, planString);
 }
 
 optimizer::PlanAndStats QueryTestBase::planVelox(
     const logical_plan::LogicalPlanNodePtr& plan,
-    std::string* planString,
-    std::string* errorString) {
-  return planFromTree(plan, planString, errorString);
+    std::string* planString) {
+  return planFromTree(plan, planString);
 }
 
 TestResult QueryTestBase::runVelox(const core::PlanNodePtr& plan) {
   TestResult result;
-  auto fragmentedPlan =
-      planVelox(plan, &result.planString, &result.errorString);
+  auto fragmentedPlan = planVelox(plan, &result.planString);
   if (!fragmentedPlan.plan) {
     return result;
   }
@@ -323,8 +294,7 @@ TestResult QueryTestBase::runVelox(const core::PlanNodePtr& plan) {
 TestResult QueryTestBase::runVelox(
     const logical_plan::LogicalPlanNodePtr& plan) {
   TestResult result;
-  auto fragmentedPlan =
-      planVelox(plan, &result.planString, &result.errorString);
+  auto fragmentedPlan = planVelox(plan, &result.planString);
   if (!fragmentedPlan.plan) {
     return result;
   }
