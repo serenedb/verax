@@ -59,9 +59,6 @@ void Optimization::markFieldAccessed(
   auto fields = isControl ? &controlSubfields_ : &payloadSubfields_;
   if (source.planNode) {
     auto name = source.planNode->name();
-    if (name == "TableScan") {
-      LOG(INFO) << "ff";
-    }
     auto path = stepsToPath(steps);
     fields->nodeFields[source.planNode].resultPaths[ordinal].add(path->id());
     if (name == "Project") {

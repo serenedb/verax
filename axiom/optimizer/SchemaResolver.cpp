@@ -21,13 +21,14 @@ namespace facebook::velox::optimizer {
 
 const connector::Table* SchemaResolver::findTable(const std::string& name) {
   TableNameParser parser(name);
-  if (!parser.valid()) {
-    VELOX_USER_FAIL("Invalid table name: '{}'", name);
-  }
+  VELOX_USER_CHECK(parser.valid(), "Invalid table name: '{}'", name);
 
   connector::Connector* connector = parser.catalog().has_value()
       ? connector::getConnector(parser.catalog().value()).get()
       : defaultConnector_.get();
+
+  VELOX_USER_CHECK_NOT_NULL(
+      connector, "Connector not found for table: {}", name);
 
   std::string lookupName;
   if (parser.schema().has_value()) {

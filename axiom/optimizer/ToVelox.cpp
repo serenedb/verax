@@ -690,6 +690,22 @@ core::PlanNodePtr Optimization::makeSubfieldProjections(
       idGenerator_.next(), std::move(names), std::move(exprs), scanNode);
 }
 
+namespace {
+core::TypedExprPtr toAndWithAliases(
+    const std::vector<core::TypedExprPtr>& exprs,
+    const BaseTable* baseTable) {
+  auto result = std::make_shared<core::CallTypedExpr>(BOOLEAN(), exprs, "and");
+
+  std::unordered_map<std::string, core::TypedExprPtr> mapping;
+  for (const auto& column : baseTable->columns) {
+    mapping[column->name()] = std::make_shared<core::FieldAccessTypedExpr>(
+        toTypePtr(column->value().type),
+        fmt::format("{}.{}", baseTable->cname, column->name()));
+  }
+  return result->rewriteInputNames(mapping);
+}
+} // namespace
+
 velox::core::PlanNodePtr Optimization::makeScan(
     TableScan& scan,
     velox::runner::ExecutableFragment& fragment,
@@ -724,16 +740,24 @@ velox::core::PlanNodePtr Optimization::makeScan(
 
   auto scanNode = std::make_shared<core::TableScanNode>(
       nextId(), outputType, handlePair.first, assignments);
-  VELOX_CHECK(handlePair.second.empty(), "Expecting no rejected filters");
-  makePredictionAndHistory(scanNode->id(), &scan);
-  fragment.scans.push_back(scanNode);
+
+  core::PlanNodePtr result = scanNode;
   if (hasSubfieldPushdown(scan)) {
-    auto result = makeSubfieldProjections(scan, scanNode);
-    columnAlteredTypes_.clear();
-    return result;
+    result = makeSubfieldProjections(scan, scanNode);
   }
+
+  if (!handlePair.second.empty()) {
+    result = std::make_shared<core::FilterNode>(
+        nextId(), toAndWithAliases(handlePair.second, scan.baseTable), result);
+    makePredictionAndHistory(result->id(), &scan);
+  } else {
+    makePredictionAndHistory(scanNode->id(), &scan);
+  }
+
+  fragment.scans.push_back(scanNode);
+
   columnAlteredTypes_.clear();
-  return scanNode;
+  return result;
 }
 
 velox::core::PlanNodePtr Optimization::makeFilter(

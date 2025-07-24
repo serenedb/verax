@@ -16,8 +16,11 @@
 
 #include "axiom/optimizer/Plan.h"
 #include <folly/init/Init.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "axiom/logical_plan/PlanBuilder.h"
 #include "axiom/optimizer/VeloxHistory.h"
+#include "axiom/optimizer/connectors/tests/TestConnector.h"
 #include "axiom/optimizer/tests/ParquetTpchTest.h"
 #include "axiom/optimizer/tests/QueryTestBase.h"
 #include "velox/exec/tests/utils/TpchQueryBuilder.h"
@@ -25,20 +28,17 @@
 DEFINE_int32(num_repeats, 1, "Number of repeats for optimization timing");
 
 DECLARE_int32(optimizer_trace);
-
 DECLARE_int32(num_workers);
-
 DECLARE_string(history_save_path);
 
-using namespace facebook::velox;
-using namespace facebook::velox::optimizer;
-using namespace facebook::velox::optimizer::test;
-
+namespace facebook::velox::optimizer {
+namespace {
 std::string nodeString(core::PlanNode* node) {
   return node->toString(true, true);
 }
 
-class PlanTest : public virtual ParquetTpchTest, public virtual QueryTestBase {
+class PlanTest : public virtual test::ParquetTpchTest,
+                 public virtual test::QueryTestBase {
  protected:
   static void SetUpTestCase() {
     ParquetTpchTest::SetUpTestCase();
@@ -106,17 +106,21 @@ class PlanTest : public virtual ParquetTpchTest, public virtual QueryTestBase {
       *veloxPlan = veloxString(fragmentedPlan.plan);
     }
     auto reference = referencePlan ? referencePlan : planNode;
-    TestResult referenceResult;
+    test::TestResult referenceResult;
     assertSame(reference, fragmentedPlan, &referenceResult);
-    auto numWorkers = FLAGS_num_workers;
+
+    const auto numWorkers = FLAGS_num_workers;
     if (numWorkers != 1) {
       FLAGS_num_workers = 1;
+      SCOPE_EXIT {
+        FLAGS_num_workers = numWorkers;
+      };
+
       auto singlePlan = planVelox(planNode, planString);
       ASSERT_TRUE(singlePlan.plan != nullptr);
       auto singleResult = runFragmentedPlan(singlePlan);
       exec::test::assertEqualResults(
           referenceResult.results, singleResult.results);
-      FLAGS_num_workers = numWorkers;
     }
   }
 
@@ -164,7 +168,7 @@ class PlanTest : public virtual ParquetTpchTest, public virtual QueryTestBase {
     }
   }
 
-  void checkTpch(int32_t query, std::string expected = "") {
+  void checkTpch(int32_t query, const std::string& expected = "") {
     auto q = builder_->getQueryPlan(query).plan;
     auto rq = referenceBuilder_->getQueryPlan(query).plan;
     std::string planText;
@@ -186,7 +190,6 @@ class PlanTest : public virtual ParquetTpchTest, public virtual QueryTestBase {
   std::unique_ptr<QueryGraphContext> context_;
   std::unique_ptr<exec::test::TpchQueryBuilder> builder_;
   std::unique_ptr<exec::test::TpchQueryBuilder> referenceBuilder_;
-  static inline bool registered;
 };
 
 void printPlan(core::PlanNode* plan, bool r, bool d) {
@@ -238,6 +241,51 @@ TEST_F(PlanTest, queryGraph) {
                     ->cardinality();
   auto interned2 = queryCtx()->toPath(path2);
   EXPECT_EQ(interned2, interned);
+}
+
+// Verify that optimizer can handle connectors that do not support filter
+// pushdown.
+TEST_F(PlanTest, rejectedFilters) {
+  static constexpr auto kTestConnectorId = "test";
+
+  auto connector = std::make_shared<connector::TestConnector>(kTestConnectorId);
+  connector->addTable(
+      "numbers", ROW({"a", "b", "c"}, {BIGINT(), DOUBLE(), VARCHAR()}));
+  connector::registerConnector(connector);
+  SCOPE_EXIT {
+    connector::unregisterConnector(kTestConnectorId);
+  };
+
+  schema_ = std::make_shared<velox::optimizer::SchemaResolver>(connector, "");
+
+  auto logicalPlan = logical_plan::PlanBuilder()
+                         .tableScan(kTestConnectorId, "numbers", {"a", "b"})
+                         .filter("a > 10")
+                         .map({"a + 2"})
+                         .build();
+
+  const auto numWorkers = FLAGS_num_workers;
+  FLAGS_num_workers = 1;
+  SCOPE_EXIT {
+    FLAGS_num_workers = numWorkers;
+  };
+
+  auto plan = planVelox(logicalPlan).plan;
+
+  EXPECT_EQ(1, plan->fragments().size());
+
+  std::vector<std::string> lines;
+  folly::split("\n", plan->toString(false), lines);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::StartsWith("Fragment 0"),
+          testing::StartsWith("-- Project"),
+          testing::StartsWith("  -- Filter"),
+          testing::StartsWith("    -- TableScan"),
+          testing::Eq(""),
+          testing::Eq("")));
 }
 
 TEST_F(PlanTest, q1) {
@@ -464,6 +512,10 @@ TEST_F(PlanTest, filterBreakup) {
       "lineitem,.*range.*l_shipinstruct,.*l_shipmode.*remaining.*l_quantity.*l_quantity.*l_quantity");
   expectRegexp(veloxString, "part.*p_size.*p_container");
 }
+
+} // namespace
+} // namespace facebook::velox::optimizer
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   folly::Init init(&argc, &argv, false);

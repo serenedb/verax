@@ -949,6 +949,9 @@ PlanObjectP Optimization::wrapInDt(const lp::LogicalPlanNode& node) {
 
 PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode* tableScan) {
   auto schemaTable = schema_.findTable(tableScan->tableName());
+  VELOX_CHECK_NOT_NULL(
+      schemaTable, "Table not found: {}", tableScan->tableName());
+
   auto cname = fmt::format("t{}", ++nameCounter_);
 
   auto* baseTable = make<BaseTable>();
