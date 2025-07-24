@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-#include "axiom/optimizer/ParallelProject.h"
 #include "axiom/optimizer/Plan.h"
 #include "velox/core/Expressions.h"
+#include "velox/core/PlanNode.h"
 
 namespace facebook::velox::optimizer {
 
@@ -157,7 +157,7 @@ core::PlanNodePtr Optimization::makeParallelProject(
       VELOX_UNREACHABLE();
     }
   });
-  return std::make_shared<exec::ParallelProjectNode>(
+  return std::make_shared<core::ParallelProjectNode>(
       nextId(), std::move(names), std::move(groups), std::move(extra), input);
 }
 
