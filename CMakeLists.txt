@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.14)
 # Set the project name.
 project(Verax)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 add_compile_definitions(DISABLE_META_INTERNAL_COMPRESSOR=1)
