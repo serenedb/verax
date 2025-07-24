@@ -16,9 +16,6 @@
 
 #include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/Plan.h"
-#include "axiom/optimizer/PlanUtils.h"
-#include "velox/exec/Aggregate.h"
-#include "velox/expression/ConstantExpr.h"
 
 namespace facebook::velox::optimizer {
 
