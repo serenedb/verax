@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include <velox/exec/Driver.h>
-#include <velox/exec/Operator.h>
+#include "velox/exec/Driver.h"
+#include "velox/exec/Operator.h"
 #include "velox/expression/Expr.h"
 
 namespace facebook::velox::exec {
@@ -39,15 +39,7 @@ class ParallelProjectNode : public core::AbstractProjectNode {
       std::vector<std::string> names,
       std::vector<std::vector<core::TypedExprPtr>> exprs,
       std::vector<std::string> noLoadIdentities,
-      core::PlanNodePtr input)
-      : AbstractProjectNode(
-            id,
-            allNames(names, noLoadIdentities),
-            flatExprs(exprs, noLoadIdentities, input),
-            input),
-        exprNames_(std::move(names)),
-        exprs_(std::move(exprs)),
-        noLoadIdentities_(std::move(noLoadIdentities)) {}
+      core::PlanNodePtr input);
 
   std::string_view name() const override {
     return "ParallelProject";
@@ -66,31 +58,21 @@ class ParallelProjectNode : public core::AbstractProjectNode {
   }
 
  private:
-  // makes a list of all names for use in the ProjectNode.
-  static std::vector<std::string> allNames(
-      const std::vector<std::string>& names,
-      const std::vector<std::string>& moreNames);
-
-  // Flattens out projection exprs and adds dummy  exprs for noLoadIdentities.
-  // Used to fill in ProjectNode members for use in the summary functions.
-  static std::vector<core::TypedExprPtr> flatExprs(
-      std::vector<std::vector<core::TypedExprPtr>>& exprs,
-      const std::vector<std::string> moreNames,
-      const core::PlanNodePtr& input);
-
   void addDetails(std::stringstream& stream) const override;
 
-  std::vector<std::string> exprNames_;
-  std::vector<std::vector<core::TypedExprPtr>> exprs_;
-  std::vector<std::string> noLoadIdentities_;
+  const std::vector<std::string> exprNames_;
+  const std::vector<std::vector<core::TypedExprPtr>> exprs_;
+  const std::vector<std::string> noLoadIdentities_;
 };
+
+using ParallelProjectNodePtr = std::shared_ptr<const ParallelProjectNode>;
 
 class ParallelProject : public Operator {
  public:
   ParallelProject(
       int32_t operatorId,
       DriverCtx* driverCtx,
-      const std::shared_ptr<const ParallelProjectNode>& node);
+      const ParallelProjectNodePtr& node);
 
   bool isFilter() const override {
     return false;
@@ -149,9 +131,9 @@ class ParallelProject : public Operator {
       int32_t workIdx,
       std::vector<VectorPtr>& result);
 
-  // Cached Parallelproject node for lazy initialization. After
+  // Cached ParallelProject node for lazy initialization. After
   // initialization, they will be reset, and initialized_ will be set to true.
-  std::shared_ptr<const ParallelProjectNode> node_;
+  const ParallelProjectNodePtr node_;
 
   bool initialized_{false};
 

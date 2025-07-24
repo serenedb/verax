@@ -16,11 +16,14 @@
 
 #include "axiom/optimizer/ParallelProject.h"
 #include "velox/common/base/AsyncSource.h"
+#include "velox/exec/Operator.h"
 #include "velox/exec/Task.h"
 
 namespace facebook::velox::exec {
 
-std::vector<std::string> ParallelProjectNode::allNames(
+namespace {
+// makes a list of all names for use in the ProjectNode.
+std::vector<std::string> allNames(
     const std::vector<std::string>& names,
     const std::vector<std::string>& moreNames) {
   auto result = names;
@@ -28,9 +31,11 @@ std::vector<std::string> ParallelProjectNode::allNames(
   return result;
 }
 
-std::vector<core::TypedExprPtr> ParallelProjectNode::flatExprs(
-    std::vector<std::vector<core::TypedExprPtr>>& exprs,
-    const std::vector<std::string> moreNames,
+// Flattens out projection exprs and adds dummy  exprs for noLoadIdentities.
+// Used to fill in ProjectNode members for use in the summary functions.
+std::vector<core::TypedExprPtr> flattenExprs(
+    const std::vector<std::vector<core::TypedExprPtr>>& exprs,
+    const std::vector<std::string>& moreNames,
     const core::PlanNodePtr& input) {
   std::vector<core::TypedExprPtr> result;
   for (auto& group : exprs) {
@@ -44,6 +49,22 @@ std::vector<core::TypedExprPtr> ParallelProjectNode::flatExprs(
   }
   return result;
 }
+} // namespace
+
+ParallelProjectNode::ParallelProjectNode(
+    const core::PlanNodeId& id,
+    std::vector<std::string> names,
+    std::vector<std::vector<core::TypedExprPtr>> exprs,
+    std::vector<std::string> noLoadIdentities,
+    core::PlanNodePtr input)
+    : AbstractProjectNode(
+          id,
+          allNames(names, noLoadIdentities),
+          flattenExprs(exprs, noLoadIdentities, input),
+          input),
+      exprNames_(std::move(names)),
+      exprs_(std::move(exprs)),
+      noLoadIdentities_(std::move(noLoadIdentities)) {}
 
 void ParallelProjectNode::addDetails(std::stringstream& stream) const {
   AbstractProjectNode::addDetails(stream);
@@ -60,14 +81,14 @@ void ParallelProjectNode::addDetails(std::stringstream& stream) const {
 ParallelProject::ParallelProject(
     int32_t operatorId,
     DriverCtx* driverCtx,
-    const std::shared_ptr<const ParallelProjectNode>& node)
+    const ParallelProjectNodePtr& node)
     : Operator(
           driverCtx,
           node->outputType(),
           operatorId,
           node->id(),
           "ParallelProject"),
-      node_(std::move(node)) {}
+      node_(node) {}
 
 namespace {
 bool checkAddIdentityProjection(
