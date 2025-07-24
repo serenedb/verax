@@ -19,7 +19,7 @@
 #include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/PlanUtils.h"
-#include "velox/exec/Aggregate.h"
+#include "velox/exec/AggregateFunctionRegistry.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/expression/FunctionSignature.h"
 
@@ -808,8 +808,8 @@ AggregationP Optimization::translateAggregation(
     VELOX_CHECK(aggregate->ordering().empty());
     Name aggName = toName(aggregate->name());
 
-    auto accumulatorType =
-        toType(exec::Aggregate::intermediateType(aggregate->name(), argTypes));
+    auto accumulatorType = toType(
+        exec::resolveAggregateFunction(aggregate->name(), argTypes).second);
     Value finalValue = Value(toType(aggregate->type()), 1);
     auto* agg = make<Aggregate>(
         aggName,

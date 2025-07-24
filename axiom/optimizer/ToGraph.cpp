@@ -16,7 +16,7 @@
 
 #include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/Plan.h"
-#include "velox/exec/Aggregate.h"
+#include "velox/exec/AggregateFunctionRegistry.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/expression/FunctionSignature.h"
 
@@ -666,22 +666,16 @@ ExprVector Optimization::translateColumns(
 
 namespace {
 
-TypePtr intermediateType(const core::CallTypedExprPtr& call) {
+std::pair<TypePtr, TypePtr> resolveAggregateCall(
+    const core::CallTypedExprPtr& call) {
   std::vector<TypePtr> types;
   for (auto& arg : call->inputs()) {
     types.push_back(arg->type());
   }
-  return exec::Aggregate::intermediateType(
+  return exec::resolveAggregateFunction(
       exec::sanitizeName(call->name()), types);
 }
 
-TypePtr finalType(const core::CallTypedExprPtr& call) {
-  std::vector<TypePtr> types;
-  for (auto& arg : call->inputs()) {
-    types.push_back(arg->type());
-  }
-  return exec::Aggregate::finalType(exec::sanitizeName(call->name()), types);
-}
 } // namespace
 
 AggregationP Optimization::translateAggregation(
@@ -724,10 +718,11 @@ AggregationP Optimization::translateAggregation(
       // both final and intermediate types. The type of rawFunc itself
       // is one or the other so resolve the types using the registered
       // signatures.
-      auto accumulatorType =
-          toType(intermediateType(source.aggregates()[i].call));
+      auto [finalType, intermediateType] =
+          resolveAggregateCall(source.aggregates()[i].call);
+      auto accumulatorType = toType(intermediateType);
       Value finalValue = rawFunc->value();
-      finalValue.type = toType(finalType(source.aggregates()[i].call));
+      finalValue.type = toType(finalType);
       auto* agg = make<Aggregate>(
           rawFunc->name(),
           finalValue,
