@@ -15,6 +15,7 @@
  */
 
 #include "axiom/logical_plan/PlanBuilder.h"
+#include "axiom/logical_plan/NameMappings.h"
 #include "axiom/optimizer/connectors/ConnectorMetadata.h"
 #include "velox/connectors/Connector.h"
 #include "velox/exec/Aggregate.h"
@@ -830,141 +831,6 @@ LogicalPlanNodePtr PlanBuilder::build() {
   }
 
   return node_;
-}
-
-namespace {
-bool isAllDigits(std::string_view str) {
-  for (auto c : str) {
-    if (!isdigit(c)) {
-      return false;
-    }
-  }
-  return true;
-}
-} // namespace
-
-std::string NameAllocator::newName(const std::string& hint) {
-  VELOX_CHECK(!hint.empty(), "Hint cannot be empty");
-
-  // Strip suffix past '_' if all digits.
-  std::string prefix = hint;
-
-  auto pos = prefix.rfind('_');
-  if (pos != std::string::npos &&
-      isAllDigits(
-          std::string_view(prefix.data() + pos + 1, prefix.size() - pos - 1))) {
-    prefix = prefix.substr(0, pos);
-  }
-
-  std::string name = prefix;
-  do {
-    if (names_.insert(name).second) {
-      return name;
-    }
-    name = fmt::format("{}_{}", prefix, nextId_++);
-  } while (true);
-}
-
-std::optional<std::string> NameMappings::lookup(const std::string& name) const {
-  auto it = mappings_.find(QualifiedName{.alias = {}, .name = name});
-  if (it != mappings_.end()) {
-    return it->second;
-  }
-
-  return std::nullopt;
-}
-
-std::optional<std::string> NameMappings::lookup(
-    const std::string& alias,
-    const std::string& name) const {
-  auto it = mappings_.find(QualifiedName{.alias = alias, .name = name});
-  if (it != mappings_.end()) {
-    return it->second;
-  }
-
-  return std::nullopt;
-}
-
-std::vector<NameMappings::QualifiedName> NameMappings::reverseLookup(
-    const std::string& id) const {
-  std::vector<QualifiedName> names;
-  for (const auto& [key, value] : mappings_) {
-    if (value == id) {
-      names.push_back(key);
-    }
-  }
-
-  VELOX_CHECK_LE(names.size(), 2);
-  if (names.size() == 2) {
-    VELOX_CHECK_EQ(names[0].name, names[1].name);
-    VELOX_CHECK_NE(names[0].alias.has_value(), names[1].alias.has_value());
-  }
-
-  return names;
-}
-
-void NameMappings::setAlias(const std::string& alias) {
-  std::vector<std::pair<std::string, std::string>> names;
-  for (auto it = mappings_.begin(); it != mappings_.end();) {
-    if (it->first.alias.has_value()) {
-      it = mappings_.erase(it);
-    } else {
-      names.emplace_back(it->first.name, it->second);
-      ++it;
-    }
-  }
-
-  for (auto& [name, id] : names) {
-    mappings_.emplace(
-        QualifiedName{.alias = alias, .name = std::move(name)}, std::move(id));
-  }
-}
-
-void NameMappings::merge(const NameMappings& other) {
-  for (const auto& [name, id] : other.mappings_) {
-    if (mappings_.count(name)) {
-      VELOX_CHECK(!name.alias.has_value());
-      mappings_.erase(name);
-    } else {
-      mappings_.emplace(name, id);
-    }
-  }
-}
-
-std::unordered_map<std::string, std::string> NameMappings::uniqueNames() const {
-  std::unordered_map<std::string, std::string> names;
-  for (const auto& [name, id] : mappings_) {
-    if (!name.alias.has_value()) {
-      names.emplace(id, name.name);
-    }
-  }
-  return names;
-}
-
-std::string NameMappings::toString() const {
-  bool first = true;
-  std::stringstream out;
-  for (const auto& [name, id] : mappings_) {
-    if (!first) {
-      out << ", ";
-    } else {
-      first = false;
-    }
-    out << name.toString() << " -> " << id;
-  }
-  return out.str();
-}
-
-size_t NameMappings::QualifiedNameHasher::operator()(
-    const QualifiedName& value) const {
-  size_t h1 = 0;
-  if (value.alias.has_value()) {
-    h1 = std::hash<std::string>()(value.alias.value());
-  }
-
-  size_t h2 = std::hash<std::string>()(value.name);
-
-  return h1 ^ (h2 << 1);
 }
 
 } // namespace facebook::velox::logical_plan

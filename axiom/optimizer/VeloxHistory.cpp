@@ -36,6 +36,10 @@ void VeloxHistory::recordJoinSample(
     float rl) {}
 
 std::pair<float, float> VeloxHistory::sampleJoin(JoinEdge* edge) {
+  if (!queryCtx()->optimization()->opts().sampleJoins) {
+    return {0, 0};
+  }
+
   auto keyPair = edge->sampleKey();
 
   if (keyPair.first.empty()) {
@@ -73,7 +77,7 @@ std::pair<float, float> VeloxHistory::sampleJoin(JoinEdge* edge) {
     joinSamples_[keyPair.first] = pair;
   }
   if (trace) {
-    std::cout << "Sample join " << keyPair.first << ": " << pair.first << " : "
+    std::cout << "Sample join " << keyPair.first << ": " << pair.first << " :"
               << pair.second
               << " time=" << succinctMicros(getCurrentTimeMicro() - start)
               << std::endl;

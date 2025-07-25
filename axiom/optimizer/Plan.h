@@ -514,6 +514,8 @@ struct OptimizerOptions {
   /// the whole map is accessed as a map.
   std::unordered_map<std::string, std::vector<std::string>> mapAsStruct;
 
+  bool sampleJoins{true};
+
   /// Produce trace of plan candidates.
   int32_t traceFlags{0};
 };

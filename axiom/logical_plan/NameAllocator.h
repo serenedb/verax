@@ -13,25 +13,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#pragma once
 
-#include <gtest/gtest.h>
-
-#include "axiom/logical_plan/NameAllocator.h"
+#include <string>
+#include <unordered_set>
 
 namespace facebook::velox::logical_plan {
 
-TEST(NameAllocatorTest, basic) {
-  NameAllocator allocator;
-  EXPECT_EQ(allocator.newName("foo"), "foo");
-  EXPECT_EQ(allocator.newName("foo"), "foo_0");
+/// Generate unique names based on user-provided hints.
+class NameAllocator {
+ public:
+  /// Returns 'hint' as is it is unique. Otherwise, return 'hint_N' where N is a
+  /// numeric suffix appended to ensure uniqueness. If 'hint' already has a
+  /// suffix and is not unique, the suffix is replaced with a new one.
+  ///
+  /// Example:
+  ///
+  ///   newName("a") -> "a"
+  ///   newName("a") -> "a_0"
+  ///   newName("a") -> "a_1"
+  ///   newName("a_0") -> "a_2"
+  std::string newName(const std::string& hint);
 
-  EXPECT_EQ(allocator.newName("bar"), "bar");
-  EXPECT_EQ(allocator.newName("bar"), "bar_1");
+  void reset() {
+    names_.clear();
+    nextId_ = 0;
+  }
 
-  EXPECT_EQ(allocator.newName("foo_0"), "foo_2");
-
-  EXPECT_EQ(allocator.newName("foo_bar"), "foo_bar");
-  EXPECT_EQ(allocator.newName("foo_bar"), "foo_bar_3");
-}
+ private:
+  std::unordered_set<std::string> names_;
+  int32_t nextId_{0};
+};
 
 } // namespace facebook::velox::logical_plan

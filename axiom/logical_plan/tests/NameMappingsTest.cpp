@@ -17,7 +17,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "axiom/logical_plan/PlanBuilder.h"
+#include "axiom/logical_plan/NameAllocator.h"
+#include "axiom/logical_plan/NameMappings.h"
 
 namespace facebook::velox::logical_plan {
 

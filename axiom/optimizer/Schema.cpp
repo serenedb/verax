@@ -76,7 +76,7 @@ ColumnCP SchemaTable::column(const std::string& name, const Value& value) {
 
 ColumnCP SchemaTable::findColumn(const std::string& name) const {
   auto it = columns.find(toName(name));
-  VELOX_CHECK(it != columns.end());
+  VELOX_CHECK(it != columns.end(), "Column not found: {}", name);
   return it->second;
 }
 
