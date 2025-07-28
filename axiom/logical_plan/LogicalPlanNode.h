@@ -67,6 +67,11 @@ class LogicalPlanNode {
     return kind_;
   }
 
+  template <typename T>
+  const T* asUnchecked() const {
+    return dynamic_cast<const T*>(this);
+  }
+
   const std::string& id() const {
     return id_;
   }
