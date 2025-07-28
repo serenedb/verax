@@ -874,14 +874,14 @@ class Optimization {
       const core::ITypedExpr* expr,
       std::vector<Step>& steps,
       bool isControl,
-      const std::vector<const RowType*> context,
+      const std::vector<const RowType*>& context,
       const std::vector<ContextSource>& sources);
 
   void markSubfields(
       const logical_plan::Expr* expr,
       std::vector<Step>& steps,
       bool isControl,
-      const std::vector<const RowType*> context,
+      const std::vector<const RowType*>& context,
       const std::vector<LogicalContextSource>& sources);
 
   void markAllSubfields(const RowType* type, const core::PlanNode* node);

@@ -1184,7 +1184,8 @@ PlanObjectP Optimization::makeQueryGraph(
     currentSelect_->limit = limit->count();
     currentSelect_->offset = limit->offset();
   } else {
-    VELOX_NYI("Unsupported PlanNode {}", static_cast<int32_t>(kind));
+    VELOX_NYI(
+        "Unsupported PlanNode {}", logical_plan::NodeKindName::toName(kind));
   }
   return currentSelect_;
 }

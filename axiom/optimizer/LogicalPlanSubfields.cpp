@@ -185,7 +185,7 @@ void Optimization::markSubfields(
     const lp::Expr* expr,
     std::vector<Step>& steps,
     bool isControl,
-    const std::vector<const RowType*> context,
+    const std::vector<const RowType*>& context,
     const std::vector<LogicalContextSource>& sources) {
   if (expr->isInputReference()) {
     auto& name = expr->asUnchecked<lp::InputReferenceExpr>()->name();

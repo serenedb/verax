@@ -34,6 +34,8 @@ enum class NodeKind {
   kUnnest = 9,
 };
 
+VELOX_DECLARE_ENUM_NAME(NodeKind)
+
 class LogicalPlanNode;
 using LogicalPlanNodePtr = std::shared_ptr<const LogicalPlanNode>;
 

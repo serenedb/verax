@@ -18,6 +18,26 @@
 #include "axiom/logical_plan/PlanNodeVisitor.h"
 
 namespace facebook::velox::logical_plan {
+
+namespace {
+folly::F14FastMap<NodeKind, std::string> nodeKindNames() {
+  return {
+      {NodeKind::kValues, "VALUES"},
+      {NodeKind::kTableScan, "TABLE_SCAN"},
+      {NodeKind::kFilter, "FILTER"},
+      {NodeKind::kProject, "PROJECT"},
+      {NodeKind::kAggregate, "AGGREGATE"},
+      {NodeKind::kJoin, "JOIN"},
+      {NodeKind::kSort, "SORT"},
+      {NodeKind::kLimit, "LIMIT"},
+      {NodeKind::kSet, "SET"},
+      {NodeKind::kUnnest, "UNNEST"},
+  };
+}
+} // namespace
+
+VELOX_DEFINE_ENUM_NAME(NodeKind, nodeKindNames)
+
 namespace {
 
 class UniqueNameChecker {

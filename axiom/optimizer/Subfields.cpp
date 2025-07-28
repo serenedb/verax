@@ -146,7 +146,7 @@ void Optimization::markSubfields(
     const core::ITypedExpr* expr,
     std::vector<Step>& steps,
     bool isControl,
-    const std::vector<const RowType*> context,
+    const std::vector<const RowType*>& context,
     const std::vector<ContextSource>& sources) {
   if (auto* field = dynamic_cast<const core::DereferenceTypedExpr*>(expr)) {
     auto* input = field->inputs()[0].get();
