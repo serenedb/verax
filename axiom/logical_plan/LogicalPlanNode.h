@@ -244,6 +244,11 @@ class ProjectNode : public LogicalPlanNode {
     return expressions_;
   }
 
+  const ExprPtr& expressionAt(size_t index) const {
+    VELOX_USER_CHECK_LT(index, expressions_.size());
+    return expressions_.at(index);
+  }
+
   void accept(const PlanNodeVisitor& visitor, PlanNodeVisitorContext& context)
       const override;
 

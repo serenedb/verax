@@ -46,7 +46,17 @@ class PlanPrinterTest : public testing::Test {
 
   static std::vector<std::string> toLines(const LogicalPlanNodePtr& plan) {
     auto text = PlanPrinter::toText(*plan);
+    return toLines(text);
+  }
 
+  static std::vector<std::string> toSummaryLines(
+      const LogicalPlanNodePtr& plan,
+      const PlanSummaryOptions& options = {}) {
+    auto text = PlanPrinter::summarizeToText(*plan, options);
+    return toLines(text);
+  }
+
+  static std::vector<std::string> toLines(const std::string& text) {
     LOG(INFO) << std::endl << text;
 
     std::vector<std::string> lines;
@@ -84,6 +94,34 @@ TEST_F(PlanPrinterTest, values) {
           testing::StartsWith("          - Values"),
           testing::Eq("")));
 
+  lines = toSummaryLines(plan);
+
+  using namespace testing;
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          Eq("- LIMIT [5]: 1 fields: c BIGINT"),
+          Eq("      limit: 5"),
+          Eq("  - SORT [4]: 1 fields: c BIGINT"),
+          Eq("    - PROJECT [3]: 1 fields: c BIGINT"),
+          Eq("          expressions: call: 1, field: 2"),
+          Eq("          functions: plus: 1"),
+          Eq("          projections: 1 out of 1"),
+          Eq("      - PROJECT [2]: 2 fields: a BIGINT, b BIGINT"),
+          Eq("            expressions: call: 1, constant: 1, field: 2"),
+          Eq("            functions: plus: 1"),
+          Eq("            constants: BIGINT: 1"),
+          Eq("            projections: 1 out of 2"),
+          Eq("        - FILTER [1]: 1 fields: a BIGINT"),
+          Eq("              predicate: gt(a, 10)"),
+          Eq("              expressions: call: 1, constant: 1, field: 1"),
+          Eq("              functions: gt: 1"),
+          Eq("              constants: BIGINT: 1"),
+          Eq("          - VALUES [0]: 1 fields: a BIGINT"),
+          Eq("                rows: 1"),
+          Eq("")));
+
   // Empty variant vector - zero rows:
   plan =
       PlanBuilder()
@@ -96,6 +134,15 @@ TEST_F(PlanPrinterTest, values) {
       testing::ElementsAre(
           testing::StartsWith("- Values: 0 rows -> ROW<a:BIGINT,b:REAL>"),
           testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- VALUES [0]: 2 fields: a BIGINT, b REAL"),
+          testing::Eq("      rows: 0"),
+          testing::Eq("")));
 }
 
 TEST_F(PlanPrinterTest, tableScan) {
@@ -104,7 +151,7 @@ TEST_F(PlanPrinterTest, tableScan) {
                   .with({"cast(a as double) * b as c"})
                   .build();
 
-  const auto lines = toLines(plan);
+  auto lines = toLines(plan);
 
   EXPECT_THAT(
       lines,
@@ -114,6 +161,20 @@ TEST_F(PlanPrinterTest, tableScan) {
           testing::StartsWith("    b := b"),
           testing::StartsWith("    c := multiply(CAST(a AS DOUBLE), b)"),
           testing::StartsWith("  - TableScan"),
+          testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- PROJECT [1]: 3 fields: a BIGINT, b DOUBLE, c DOUBLE"),
+          testing::Eq("      expressions: CAST: 1, call: 1, field: 4"),
+          testing::Eq("      functions: multiply: 1"),
+          testing::Eq("      projections: 1 out of 3"),
+          testing::Eq("  - TABLE_SCAN [0]: 2 fields: a BIGINT, b DOUBLE"),
+          testing::Eq("        table: test"),
+          testing::Eq("        connector: test"),
           testing::Eq("")));
 }
 
@@ -134,7 +195,7 @@ TEST_F(PlanPrinterTest, aggregate) {
           .with({"total + 1", "mean * 0.3"})
           .build();
 
-  const auto lines = toLines(plan);
+  auto lines = toLines(plan);
 
   EXPECT_THAT(
       lines,
@@ -152,6 +213,23 @@ TEST_F(PlanPrinterTest, aggregate) {
           testing::StartsWith("      min := min(plus(b, "),
           testing::StartsWith("    - Values"),
           testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  using namespace testing;
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          Eq("- PROJECT [2]: 6 fields: a INTEGER, total BIGINT, mean DOUBLE, min INTEGER, expr BIGINT, ..."),
+          Eq("      expressions: call: 2, constant: 2, field: 6"),
+          Eq("      functions: multiply: 1, plus: 1"),
+          Eq("      constants: BIGINT: 1, DOUBLE: 1"),
+          Eq("      projections: 2 out of 6"),
+          Eq("  - AGGREGATE [1]: 4 fields: a INTEGER, total BIGINT, mean DOUBLE, min INTEGER"),
+          Eq("    - VALUES [0]: 2 fields: a INTEGER, b INTEGER"),
+          Eq("          rows: 4"),
+          Eq("")));
 }
 
 TEST_F(PlanPrinterTest, union) {
@@ -174,7 +252,7 @@ TEST_F(PlanPrinterTest, union) {
                   .with({"a::double + b"})
                   .build();
 
-  const auto lines = toLines(plan);
+  auto lines = toLines(plan);
 
   EXPECT_THAT(
       lines,
@@ -187,6 +265,24 @@ TEST_F(PlanPrinterTest, union) {
           testing::StartsWith("    - Values"),
           testing::StartsWith("    - Values"),
           testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  using namespace testing;
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          Eq("- PROJECT [3]: 3 fields: a INTEGER, b DOUBLE, expr DOUBLE"),
+          Eq("      expressions: CAST: 1, call: 1, field: 4"),
+          Eq("      functions: plus: 1"),
+          Eq("      projections: 1 out of 3"),
+          Eq("  - UNION ALL [2]: 2 fields: a INTEGER, b DOUBLE"),
+          Eq("    - VALUES [0]: 2 fields: a INTEGER, b DOUBLE"),
+          Eq("          rows: 2"),
+          Eq("    - VALUES [1]: 2 fields: a_0 INTEGER, b_1 DOUBLE"),
+          Eq("          rows: 2"),
+          Eq("")));
 }
 
 TEST_F(PlanPrinterTest, join) {
@@ -215,7 +311,7 @@ TEST_F(PlanPrinterTest, join) {
                   .with({"l.v + r.w as z"})
                   .build();
 
-  const auto lines = toLines(plan);
+  auto lines = toLines(plan);
 
   EXPECT_THAT(
       lines,
@@ -230,6 +326,25 @@ TEST_F(PlanPrinterTest, join) {
           testing::StartsWith("    - Values: 4 rows"),
           testing::StartsWith("    - Values: 2 rows"),
           testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  using namespace testing;
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          Eq("- PROJECT [3]: 5 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER, z INTEGER"),
+          Eq("      expressions: call: 1, field: 6"),
+          Eq("      functions: plus: 1"),
+          Eq("      projections: 1 out of 5"),
+          Eq("  - JOIN LEFT [2]: 4 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER"),
+          Eq("        condition: eq(key, key_0)"),
+          Eq("    - VALUES [0]: 2 fields: key INTEGER, v INTEGER"),
+          Eq("          rows: 4"),
+          Eq("    - VALUES [1]: 2 fields: key_0 INTEGER, w INTEGER"),
+          Eq("          rows: 2"),
+          Eq("")));
 }
 
 TEST_F(PlanPrinterTest, crossJoin) {
@@ -257,7 +372,7 @@ TEST_F(PlanPrinterTest, crossJoin) {
                   .with({"l.v + r.w as z"})
                   .build();
 
-  const auto lines = toLines(plan);
+  auto lines = toLines(plan);
 
   EXPECT_THAT(
       lines,
@@ -272,6 +387,24 @@ TEST_F(PlanPrinterTest, crossJoin) {
           testing::StartsWith("    - Values: 3 rows"),
           testing::StartsWith("    - Values: 2 rows"),
           testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  using namespace testing;
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          Eq("- PROJECT [3]: 5 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER, z INTEGER"),
+          Eq("      expressions: call: 1, field: 6"),
+          Eq("      functions: plus: 1"),
+          Eq("      projections: 1 out of 5"),
+          Eq("  - JOIN INNER [2]: 4 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER"),
+          Eq("    - VALUES [0]: 2 fields: key INTEGER, v INTEGER"),
+          Eq("          rows: 3"),
+          Eq("    - VALUES [1]: 2 fields: key_0 INTEGER, w INTEGER"),
+          Eq("          rows: 2"),
+          Eq("")));
 }
 
 TEST_F(PlanPrinterTest, specialForms) {
@@ -331,6 +464,49 @@ TEST_F(PlanPrinterTest, specialForms) {
           testing::StartsWith("      expr_8 := DEREFERENCE(c, 1)"),
           testing::StartsWith("    - Values: 4 rows"),
           testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  using namespace testing;
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          Eq("- PROJECT [2]: 10 fields: a BOOLEAN, b BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
+          Eq("      expressions: field: 10"),
+          Eq("  - PROJECT [1]: 10 fields: a_0 BOOLEAN, b_1 BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
+          Eq("        expressions: AND: 1, CAST: 6, COALESCE: 1, DEREFERENCE: 2, IF: 1, OR: 1, SWITCH: 1, TRY: 1, TRY_CAST: 1, call: 10, constant: 11, field: 21"),
+          Eq("        functions: divide: 2, eq: 2, gt: 4, lt: 1, multiply: 1"),
+          Eq("        constants: BIGINT: 5, DOUBLE: 1, INTEGER: 1, VARCHAR: 4"),
+          Eq("        projections: 8 out of 10"),
+          Eq("        dereferences: 2 out of 10"),
+          Eq("    - VALUES [0]: 3 fields: a INTEGER, b INTEGER, c ROW(2)"),
+          Eq("          rows: 4"),
+          Eq("")));
+
+  lines = toSummaryLines(
+      plan, {.project = {.maxProjections = 3, .maxDereferences = 1}});
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          Eq("- PROJECT [2]: 10 fields: a BOOLEAN, b BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
+          Eq("      expressions: field: 10"),
+          Eq("  - PROJECT [1]: 10 fields: a_0 BOOLEAN, b_1 BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
+          Eq("        expressions: AND: 1, CAST: 6, COALESCE: 1, DEREFERENCE: 2, IF: 1, OR: 1, SWITCH: 1, TRY: 1, TRY_CAST: 1, call: 10, constant: 11, field: 21"),
+          Eq("        functions: divide: 2, eq: 2, gt: 4, lt: 1, multiply: 1"),
+          Eq("        constants: BIGINT: 5, DOUBLE: 1, INTEGER: 1, VARCHAR: 4"),
+          Eq("        projections: 8 out of 10"),
+          Eq("          a_0: AND(gt(a, b), gt(b, CAST(10 AS INTEGER)))"),
+          Eq("          b_1: OR(lt(a, b), gt(b, CAST(0 AS INTEGER)))"),
+          Eq("          expr: multiply(CAST(a AS DOUBLE), 1.2)"),
+          Eq("          ... 5 more"),
+          Eq("        dereferences: 2 out of 10"),
+          Eq("          expr_4: DEREFERENCE(c, x)"),
+          Eq("          ... 1 more"),
+          Eq("    - VALUES [0]: 3 fields: a INTEGER, b INTEGER, c ROW(2)"),
+          Eq("          rows: 4"),
+          Eq("")));
 }
 
 TEST_F(PlanPrinterTest, lambda) {
@@ -355,6 +531,22 @@ TEST_F(PlanPrinterTest, lambda) {
               "    expr := filter(sequence(CAST(1 AS BIGINT), a), x -> gt(x, b))"),
           testing::StartsWith("  - Values"),
           testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  using namespace testing;
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          Eq("- PROJECT [1]: 1 fields: expr ARRAY"),
+          Eq("      expressions: CAST: 1, call: 3, constant: 1, field: 3, lambda: 1"),
+          Eq("      functions: filter: 1, gt: 1, sequence: 1"),
+          Eq("      constants: BIGINT: 1"),
+          Eq("      projections: 1 out of 1"),
+          Eq("  - VALUES [0]: 2 fields: a BIGINT, b BIGINT"),
+          Eq("        rows: 2"),
+          Eq("")));
 }
 
 } // namespace

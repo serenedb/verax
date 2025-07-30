@@ -280,7 +280,9 @@ class SummarizeExprVisitor : public ExprVisitor {
   }
 
   void visit(const LambdaExpr& expr, ExprVisitorContext& ctx) const override {
-    VELOX_NYI();
+    auto& myCtx = static_cast<Context&>(ctx);
+    myCtx.expressionCounts()["lambda"]++;
+    expr.body()->accept(*this, ctx);
   }
 
   void visit(const SubqueryExpr& expr, ExprVisitorContext& ctx) const override {
@@ -297,6 +299,10 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
     int32_t indent{0};
 
     explicit Context(const PlanSummaryOptions& _options) : options(_options) {}
+
+    void appendExpression(const Expr& expr) {
+      out << truncate(ExprPrinter::toText(expr), options.maxLength);
+    }
   };
 
   void visit(const ValuesNode& node, PlanNodeVisitorContext& context)
@@ -325,9 +331,9 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
     appendHeader(node, myContext);
 
     const auto indent = makeIndent(myContext.indent + 3);
-    myContext.out << indent << "predicate: "
-                  << truncate(ExprPrinter::toText(*node.predicate()))
-                  << std::endl;
+    myContext.out << indent << "predicate: ";
+    myContext.appendExpression(*node.predicate());
+    myContext.out << std::endl;
 
     appendExpressions(std::vector<ExprPtr>{node.predicate()}, myContext);
 
@@ -339,6 +345,45 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
     auto& myContext = static_cast<Context&>(context);
     appendHeader(node, myContext);
     appendExpressions(node.expressions(), myContext);
+
+    const auto indent = makeIndent(myContext.indent + 3);
+
+    // Collect non-identity projections.
+    auto [projections, dereferences] = categorizeProjections(node);
+
+    // projections: 4 out of 10
+    const size_t numFields = node.outputType()->size();
+    if (!projections.empty()) {
+      myContext.out << indent << "projections: " << projections.size()
+                    << " out of " << numFields << std::endl;
+      {
+        const auto cnt = std::min(
+            myContext.options.project.maxProjections, projections.size());
+        appendProjections(
+            makeIndent(myContext.indent + 4),
+            node,
+            projections,
+            cnt,
+            myContext);
+      }
+    }
+
+    // dereferences: 2 out of 10
+    if (!dereferences.empty()) {
+      myContext.out << indent << "dereferences: " << dereferences.size()
+                    << " out of " << numFields << std::endl;
+      {
+        const auto cnt = std::min(
+            myContext.options.project.maxDereferences, dereferences.size());
+        appendProjections(
+            makeIndent(myContext.indent + 4),
+            node,
+            dereferences,
+            cnt,
+            myContext);
+      }
+    }
+
     appendInputs(node, myContext);
   }
 
@@ -351,15 +396,18 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
       const override {
     auto& myContext = static_cast<Context&>(context);
     appendHeader(
-        fmt::format("Join {}", JoinTypeName::toName(node.joinType())),
+        fmt::format(
+            "{} {}",
+            NodeKindName::toName(node.kind()),
+            JoinTypeName::toName(node.joinType())),
         node,
         myContext);
 
     const auto indent = makeIndent(myContext.indent + 3);
     if (node.condition() != nullptr) {
-      myContext.out << indent << "condition: "
-                    << truncate(ExprPrinter::toText(*node.condition()))
-                    << std::endl;
+      myContext.out << indent << "condition: ";
+      myContext.appendExpression(*node.condition());
+      myContext.out << std::endl;
     }
 
     appendInputs(node, myContext);
@@ -406,10 +454,6 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
     appendNode(std::string(NodeKindName::toName(node.kind())), node, context);
   }
 
-  void appendHeader(const LogicalPlanNode& node, Context& context) const {
-    appendHeader(std::string(NodeKindName::toName(node.kind())), node, context);
-  }
-
   void appendNode(
       const std::string& name,
       const LogicalPlanNode& node,
@@ -417,6 +461,14 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
     auto& myContext = static_cast<Context&>(context);
     appendHeader(name, node, myContext);
     appendInputs(node, myContext);
+  }
+
+  // Appends a single line header for the given node:
+  //  - <name> [<id>]: N fields: field1 type1, field2 type2, ...
+  //
+  // Example: - PROJECT [8]: 2 fields: a VARCHAR, b INTEGER
+  void appendHeader(const LogicalPlanNode& node, Context& context) const {
+    appendHeader(std::string(NodeKindName::toName(node.kind())), node, context);
   }
 
   void appendHeader(
@@ -446,10 +498,43 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
       expression->accept(visitor, exprCtx);
     }
 
-    appendExpressionStats(exprCtx, indent, context.options, context.out);
+    appendExpressionStats(exprCtx, indent, context);
   }
 
-  // @param sortByKey Indicated whether to sort counts by key asc (default) or
+  // Appends up to 3 lines: expressions, functions, constants.
+  //
+  // Example:
+  //    expressions: AND: 2, OR: 1, call: 4, constant: 4, field: 4
+  //    functions: eq: 2, gte: 1, lte: 1
+  //    constants: VARCHAR: 4
+  static void appendExpressionStats(
+      const ExprStats& stats,
+      const std::string& indent,
+      Context& context) {
+    context.out << indent << "expressions: ";
+    appendCounts(stats.expressionCounts(), context.out);
+    context.out << std::endl;
+
+    if (!stats.functionCounts().empty()) {
+      context.out << indent << "functions: ";
+      appendCounts(stats.functionCounts(), context.out);
+      context.out << std::endl;
+    }
+
+    if (!stats.constantCounts().empty()) {
+      context.out << indent << "constants: ";
+      std::unordered_map<std::string, int64_t> counts;
+      for (const auto& [type, count] : stats.constantCounts()) {
+        counts[type->toSummaryString(
+            {.maxChildren = (uint32_t)context.options.maxChildTypes})] += count;
+      }
+
+      appendCounts(counts, context.out);
+      context.out << std::endl;
+    }
+  }
+
+  // @param sortByKey Indicates whether to sort counts by key asc (default) or
   // 'count' desc.
   static void appendCounts(
       const std::unordered_map<std::string, int64_t>& counts,
@@ -484,31 +569,64 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
     }
   }
 
-  static void appendExpressionStats(
-      const ExprStats& stats,
-      const std::string& indent,
-      const PlanSummaryOptions& options,
-      std::ostream& out) {
-    out << indent << "expressions: ";
-    appendCounts(stats.expressionCounts(), out);
-    out << std::endl;
+  struct Projections {
+    // Non-identity non-dereference projections.
+    std::vector<size_t> projections;
 
-    if (!stats.functionCounts().empty()) {
-      out << indent << "functions: ";
-      appendCounts(stats.functionCounts(), out);
-      out << std::endl;
-    }
+    // Struct field access projections.
+    std::vector<size_t> dereferences;
+  };
 
-    if (!stats.constantCounts().empty()) {
-      out << indent << "constants: ";
-      std::unordered_map<std::string, int64_t> counts;
-      for (const auto& [type, count] : stats.constantCounts()) {
-        counts[type->toSummaryString(
-            {.maxChildren = (uint32_t)options.maxChildTypes})] += count;
+  static Projections categorizeProjections(const ProjectNode& node) {
+    const size_t numFields = node.outputType()->size();
+
+    std::vector<size_t> projections;
+    projections.reserve(numFields);
+
+    std::vector<size_t> dereferences;
+    dereferences.reserve(numFields);
+
+    for (auto i = 0; i < numFields; ++i) {
+      const auto& expr = node.expressionAt(i);
+      if (expr->isInputReference()) {
+        // Skip identity projection.
+        continue;
       }
 
-      appendCounts(counts, out);
-      out << std::endl;
+      if (expr->isSpecialForm() &&
+          expr->asUnchecked<SpecialFormExpr>()->form() ==
+              SpecialForm::kDereference) {
+        dereferences.push_back(i);
+      } else {
+        projections.push_back(i);
+      }
+    }
+
+    return {projections, dereferences};
+  }
+
+  static void appendProjections(
+      const std::string& indent,
+      const ProjectNode& node,
+      const std::vector<size_t>& projections,
+      size_t cnt,
+      Context& context) {
+    if (cnt == 0) {
+      return;
+    }
+
+    const auto& expressions = node.expressions();
+    for (auto i = 0; i < cnt; ++i) {
+      const auto index = projections[i];
+      const auto& expr = expressions.at(index);
+      context.out << indent << node.outputType()->nameOf(index) << ": ";
+      context.appendExpression(*expr);
+      context.out << std::endl;
+    }
+
+    if (cnt < projections.size()) {
+      context.out << indent << "... " << (projections.size() - cnt) << " more"
+                  << std::endl;
     }
   }
 
