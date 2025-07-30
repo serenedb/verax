@@ -570,8 +570,8 @@ JoinEdgeP makeExists(PlanObjectCP table, const PlanObjectSet& tables) {
         continue;
       }
 
-      auto* exists = QGC_MAKE_IN_ARENA(JoinEdge)(
-          table, join->leftTable(), {}, false, false, true, false);
+      auto* exists = make<JoinEdge>(
+          table, join->leftTable(), ExprVector{}, false, false, true, false);
       for (auto i = 0; i < join->leftKeys().size(); ++i) {
         exists->addEquality(join->rightKeys()[i], join->leftKeys()[i]);
       }
@@ -617,8 +617,8 @@ std::pair<DerivedTableP, JoinEdgeP> makeExistsDtAndJoin(
   } else {
     existsDt = it->second;
   }
-  auto* joinWithDt = QGC_MAKE_IN_ARENA(JoinEdge)(
-      firstTable, existsDt, {}, false, false, true, false);
+  auto* joinWithDt = make<JoinEdge>(
+      firstTable, existsDt, ExprVector{}, false, false, true, false);
   joinWithDt->setFanouts(existsFanout, 1);
   for (auto i = 0; i < existsJoin->leftKeys().size(); ++i) {
     joinWithDt->addEquality(existsJoin->leftKeys()[i], existsDt->columns[i]);
@@ -817,8 +817,8 @@ JoinEdgeP importedJoin(
   auto left = singleTable(innerKey);
   VELOX_CHECK(left);
   auto otherKey = join->sideOf(other).keys[0];
-  auto* newJoin = QGC_MAKE_IN_ARENA(JoinEdge)(
-      left, other, {}, false, false, !fullyImported, false);
+  auto* newJoin = make<JoinEdge>(
+      left, other, ExprVector{}, false, false, !fullyImported, false);
   newJoin->addEquality(innerKey, otherKey);
   return newJoin;
 }
@@ -831,8 +831,8 @@ JoinEdgeP importedDtJoin(
   auto left = singleTable(innerKey);
   VELOX_CHECK(left);
   auto otherKey = dt->columns[0];
-  auto* newJoin = QGC_MAKE_IN_ARENA(JoinEdge)(
-      left, dt, {}, false, false, !fullyImported, false);
+  auto* newJoin = make<JoinEdge>(
+      left, dt, ExprVector{}, false, false, !fullyImported, false);
   newJoin->addEquality(innerKey, otherKey);
   return newJoin;
 }
@@ -1007,8 +1007,8 @@ findJoin(DerivedTableP dt, std::vector<PlanObjectP>& tables, bool create) {
     }
   }
   if (create) {
-    auto* join = QGC_MAKE_IN_ARENA(JoinEdge)(
-        tables[0], tables[1], {}, false, false, false, false);
+    auto* join = make<JoinEdge>(
+        tables[0], tables[1], ExprVector{}, false, false, false, false);
     dt->joins.push_back(join);
     return join;
   }
