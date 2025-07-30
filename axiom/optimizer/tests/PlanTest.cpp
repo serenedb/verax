@@ -40,6 +40,8 @@ std::string nodeString(core::PlanNode* node) {
 class PlanTest : public virtual test::ParquetTpchTest,
                  public virtual test::QueryTestBase {
  protected:
+  static constexpr auto kTestConnectorId = "test";
+
   static void SetUpTestCase() {
     ParquetTpchTest::SetUpTestCase();
     LocalRunnerTestBase::testDataPath_ = FLAGS_data_path;
@@ -69,6 +71,10 @@ class PlanTest : public virtual test::ParquetTpchTest,
     referenceBuilder_ = std::make_unique<exec::test::TpchQueryBuilder>(
         dwio::common::FileFormat::PARQUET);
     referenceBuilder_->initialize(FLAGS_data_path);
+
+    testConnector_ =
+        std::make_shared<connector::TestConnector>(kTestConnectorId);
+    connector::registerConnector(testConnector_);
   }
 
   void TearDown() override {
@@ -77,6 +83,7 @@ class PlanTest : public virtual test::ParquetTpchTest,
     allocator_.reset();
     ParquetTpchTest::TearDown();
     QueryTestBase::TearDown();
+    connector::unregisterConnector(kTestConnectorId);
   }
 
   std::string makePlan(
@@ -186,10 +193,28 @@ class PlanTest : public virtual test::ParquetTpchTest,
     }
   }
 
+  runner::MultiFragmentPlanPtr toSingleNodePlan(
+      const velox::logical_plan::LogicalPlanNodePtr& logicalPlan) {
+    const auto numWorkers = FLAGS_num_workers;
+    FLAGS_num_workers = 1;
+    SCOPE_EXIT {
+      FLAGS_num_workers = numWorkers;
+    };
+
+    schema_ =
+        std::make_shared<velox::optimizer::SchemaResolver>(testConnector_, "");
+
+    auto plan = planVelox(logicalPlan).plan;
+
+    EXPECT_EQ(1, plan->fragments().size());
+    return plan;
+  }
+
   std::unique_ptr<HashStringAllocator> allocator_;
   std::unique_ptr<QueryGraphContext> context_;
   std::unique_ptr<exec::test::TpchQueryBuilder> builder_;
   std::unique_ptr<exec::test::TpchQueryBuilder> referenceBuilder_;
+  std::shared_ptr<connector::TestConnector> testConnector_;
 };
 
 void printPlan(core::PlanNode* plan, bool r, bool d) {
@@ -243,20 +268,38 @@ TEST_F(PlanTest, queryGraph) {
   EXPECT_EQ(interned2, interned);
 }
 
+TEST_F(PlanTest, agg) {
+  testConnector_->addTable(
+      "numbers", ROW({"a", "b", "c"}, {BIGINT(), DOUBLE(), VARCHAR()}));
+
+  auto logicalPlan = logical_plan::PlanBuilder()
+                         .tableScan(kTestConnectorId, "numbers", {"a", "b"})
+                         .aggregate({"a"}, {"sum(b)"})
+                         .build();
+
+  auto plan = toSingleNodePlan(logicalPlan);
+
+  std::vector<std::string> lines;
+  folly::split("\n", plan->toString(false), lines);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::StartsWith("Fragment 0"),
+          testing::Eq("-- Project[4]"),
+          testing::Eq("  -- Aggregation[3]"),
+          testing::Eq("    -- LocalPartition[2]"),
+          testing::Eq("      -- Aggregation[1]"),
+          testing::Eq("        -- TableScan[0]"),
+          testing::Eq(""),
+          testing::Eq("")));
+}
+
 // Verify that optimizer can handle connectors that do not support filter
 // pushdown.
 TEST_F(PlanTest, rejectedFilters) {
-  static constexpr auto kTestConnectorId = "test";
-
-  auto connector = std::make_shared<connector::TestConnector>(kTestConnectorId);
-  connector->addTable(
+  testConnector_->addTable(
       "numbers", ROW({"a", "b", "c"}, {BIGINT(), DOUBLE(), VARCHAR()}));
-  connector::registerConnector(connector);
-  SCOPE_EXIT {
-    connector::unregisterConnector(kTestConnectorId);
-  };
-
-  schema_ = std::make_shared<velox::optimizer::SchemaResolver>(connector, "");
 
   auto logicalPlan = logical_plan::PlanBuilder()
                          .tableScan(kTestConnectorId, "numbers", {"a", "b"})
@@ -264,15 +307,7 @@ TEST_F(PlanTest, rejectedFilters) {
                          .map({"a + 2"})
                          .build();
 
-  const auto numWorkers = FLAGS_num_workers;
-  FLAGS_num_workers = 1;
-  SCOPE_EXIT {
-    FLAGS_num_workers = numWorkers;
-  };
-
-  auto plan = planVelox(logicalPlan).plan;
-
-  EXPECT_EQ(1, plan->fragments().size());
+  auto plan = toSingleNodePlan(logicalPlan);
 
   std::vector<std::string> lines;
   folly::split("\n", plan->toString(false), lines);

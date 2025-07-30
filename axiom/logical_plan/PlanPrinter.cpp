@@ -84,6 +84,8 @@ class ToTextVisitor : public PlanNodeVisitor {
       myContext.out << ExprPrinter::toText(*node.groupingKeys().at(i));
     }
 
+    myContext.out << ")";
+
     appendOutputType(node, myContext);
 
     myContext.out << std::endl;
