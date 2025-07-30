@@ -294,11 +294,15 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
  public:
   struct Context : public PlanNodeVisitorContext {
     const PlanSummaryOptions options;
+    const bool skeletonOnly;
 
     std::stringstream out;
     int32_t indent{0};
 
-    explicit Context(const PlanSummaryOptions& _options) : options(_options) {}
+    explicit Context(
+        const PlanSummaryOptions& _options,
+        bool _skeletonOnly = false)
+        : options(_options), skeletonOnly{_skeletonOnly} {}
 
     void appendExpression(const Expr& expr) {
       out << truncate(ExprPrinter::toText(expr), options.maxLength);
@@ -309,6 +313,10 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
       const override {
     auto& myContext = static_cast<Context&>(context);
     appendHeader(node, myContext);
+
+    if (myContext.skeletonOnly) {
+      return;
+    }
 
     const auto indent = makeIndent(myContext.indent + 3);
     myContext.out << indent << "rows: " << node.rows().size() << std::endl;
@@ -330,12 +338,14 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
     auto& myContext = static_cast<Context&>(context);
     appendHeader(node, myContext);
 
-    const auto indent = makeIndent(myContext.indent + 3);
-    myContext.out << indent << "predicate: ";
-    myContext.appendExpression(*node.predicate());
-    myContext.out << std::endl;
+    if (!myContext.skeletonOnly) {
+      const auto indent = makeIndent(myContext.indent + 3);
+      myContext.out << indent << "predicate: ";
+      myContext.appendExpression(*node.predicate());
+      myContext.out << std::endl;
 
-    appendExpressions(std::vector<ExprPtr>{node.predicate()}, myContext);
+      appendExpressions(std::vector<ExprPtr>{node.predicate()}, myContext);
+    }
 
     appendInputs(node, myContext);
   }
@@ -343,6 +353,12 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
   void visit(const ProjectNode& node, PlanNodeVisitorContext& context)
       const override {
     auto& myContext = static_cast<Context&>(context);
+
+    if (myContext.skeletonOnly) {
+      node.onlyInput()->accept(*this, context);
+      return;
+    }
+
     appendHeader(node, myContext);
     appendExpressions(node.expressions(), myContext);
 
@@ -403,11 +419,13 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
         node,
         myContext);
 
-    const auto indent = makeIndent(myContext.indent + 3);
-    if (node.condition() != nullptr) {
-      myContext.out << indent << "condition: ";
-      myContext.appendExpression(*node.condition());
-      myContext.out << std::endl;
+    if (!myContext.skeletonOnly) {
+      const auto indent = makeIndent(myContext.indent + 3);
+      if (node.condition() != nullptr) {
+        myContext.out << indent << "condition: ";
+        myContext.appendExpression(*node.condition());
+        myContext.out << std::endl;
+      }
     }
 
     appendInputs(node, myContext);
@@ -423,12 +441,14 @@ class SummarizeToTextVisitor : public PlanNodeVisitor {
     auto& myContext = static_cast<Context&>(context);
     appendHeader(node, myContext);
 
-    const auto indent = makeIndent(myContext.indent + 3);
-    myContext.out << indent << "limit: " << node.count();
-    if (node.offset() > 0) {
-      myContext.out << " offset: " << node.offset();
+    if (!myContext.skeletonOnly) {
+      const auto indent = makeIndent(myContext.indent + 3);
+      myContext.out << indent << "limit: " << node.count();
+      if (node.offset() > 0) {
+        myContext.out << " offset: " << node.offset();
+      }
+      myContext.out << std::endl;
     }
-    myContext.out << std::endl;
 
     appendInputs(node, myContext);
   }
@@ -675,6 +695,16 @@ std::string PlanPrinter::summarizeToText(
     const LogicalPlanNode& root,
     const PlanSummaryOptions& options) {
   SummarizeToTextVisitor::Context context{options};
+  SummarizeToTextVisitor visitor;
+  root.accept(visitor, context);
+  return context.out.str();
+}
+
+// static
+std::string PlanPrinter::toSkeletonText(const LogicalPlanNode& root) {
+  SummarizeToTextVisitor::Context context{
+      {.maxOutputFields = 0},
+      /* skeleton */ true};
   SummarizeToTextVisitor visitor;
   root.accept(visitor, context);
   return context.out.str();

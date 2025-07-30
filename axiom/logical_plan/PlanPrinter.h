@@ -70,6 +70,11 @@ class PlanPrinter {
   static std::string summarizeToText(
       const LogicalPlanNode& root,
       const PlanSummaryOptions& options = {});
+
+  // Returns even shorter summary of the plan. Drops all Project nodes. Drops
+  // output column names and types. Drops all details except table name for
+  // TableScan node.
+  static std::string toSkeletonText(const LogicalPlanNode& root);
 };
 
 } // namespace facebook::velox::logical_plan

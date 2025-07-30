@@ -56,6 +56,12 @@ class PlanPrinterTest : public testing::Test {
     return toLines(text);
   }
 
+  static std::vector<std::string> toSkeletonLines(
+      const LogicalPlanNodePtr& plan) {
+    auto text = PlanPrinter::toSkeletonText(*plan);
+    return toLines(text);
+  }
+
   static std::vector<std::string> toLines(const std::string& text) {
     LOG(INFO) << std::endl << text;
 
@@ -122,6 +128,17 @@ TEST_F(PlanPrinterTest, values) {
           Eq("                rows: 1"),
           Eq("")));
 
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- LIMIT [5]: 1 fields"),
+          testing::Eq("  - SORT [4]: 1 fields"),
+          testing::Eq("    - FILTER [1]: 1 fields"),
+          testing::Eq("      - VALUES [0]: 1 fields"),
+          testing::Eq("")));
+
   // Empty variant vector - zero rows:
   plan =
       PlanBuilder()
@@ -143,6 +160,13 @@ TEST_F(PlanPrinterTest, values) {
           testing::Eq("- VALUES [0]: 2 fields: a BIGINT, b REAL"),
           testing::Eq("      rows: 0"),
           testing::Eq("")));
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- VALUES [0]: 2 fields"), testing::Eq("")));
 }
 
 TEST_F(PlanPrinterTest, tableScan) {
@@ -175,6 +199,16 @@ TEST_F(PlanPrinterTest, tableScan) {
           testing::Eq("  - TABLE_SCAN [0]: 2 fields: a BIGINT, b DOUBLE"),
           testing::Eq("        table: test"),
           testing::Eq("        connector: test"),
+          testing::Eq("")));
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- TABLE_SCAN [0]: 2 fields"),
+          testing::Eq("      table: test"),
+          testing::Eq("      connector: test"),
           testing::Eq("")));
 }
 
@@ -230,6 +264,15 @@ TEST_F(PlanPrinterTest, aggregate) {
           Eq("    - VALUES [0]: 2 fields: a INTEGER, b INTEGER"),
           Eq("          rows: 4"),
           Eq("")));
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- AGGREGATE [1]: 4 fields"),
+          testing::Eq("  - VALUES [0]: 2 fields"),
+          testing::Eq("")));
 }
 
 TEST_F(PlanPrinterTest, union) {
@@ -283,6 +326,16 @@ TEST_F(PlanPrinterTest, union) {
           Eq("    - VALUES [1]: 2 fields: a_0 INTEGER, b_1 DOUBLE"),
           Eq("          rows: 2"),
           Eq("")));
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- UNION ALL [2]: 2 fields"),
+          testing::Eq("  - VALUES [0]: 2 fields"),
+          testing::Eq("  - VALUES [1]: 2 fields"),
+          testing::Eq("")));
 }
 
 TEST_F(PlanPrinterTest, join) {
@@ -345,6 +398,16 @@ TEST_F(PlanPrinterTest, join) {
           Eq("    - VALUES [1]: 2 fields: key_0 INTEGER, w INTEGER"),
           Eq("          rows: 2"),
           Eq("")));
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- JOIN LEFT [2]: 4 fields"),
+          testing::Eq("  - VALUES [0]: 2 fields"),
+          testing::Eq("  - VALUES [1]: 2 fields"),
+          testing::Eq("")));
 }
 
 TEST_F(PlanPrinterTest, crossJoin) {
@@ -405,6 +468,16 @@ TEST_F(PlanPrinterTest, crossJoin) {
           Eq("    - VALUES [1]: 2 fields: key_0 INTEGER, w INTEGER"),
           Eq("          rows: 2"),
           Eq("")));
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- JOIN INNER [2]: 4 fields"),
+          testing::Eq("  - VALUES [0]: 2 fields"),
+          testing::Eq("  - VALUES [1]: 2 fields"),
+          testing::Eq("")));
 }
 
 TEST_F(PlanPrinterTest, specialForms) {
@@ -507,6 +580,13 @@ TEST_F(PlanPrinterTest, specialForms) {
           Eq("    - VALUES [0]: 3 fields: a INTEGER, b INTEGER, c ROW(2)"),
           Eq("          rows: 4"),
           Eq("")));
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- VALUES [0]: 3 fields"), testing::Eq("")));
 }
 
 TEST_F(PlanPrinterTest, lambda) {
@@ -547,6 +627,13 @@ TEST_F(PlanPrinterTest, lambda) {
           Eq("  - VALUES [0]: 2 fields: a BIGINT, b BIGINT"),
           Eq("        rows: 2"),
           Eq("")));
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- VALUES [0]: 2 fields"), testing::Eq("")));
 }
 
 } // namespace
