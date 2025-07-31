@@ -288,7 +288,10 @@ class SummarizeExprVisitor : public ExprVisitor {
   }
 
   void visit(const SubqueryExpr& expr, ExprVisitorContext& ctx) const override {
-    VELOX_NYI();
+    auto& myCtx = static_cast<Context&>(ctx);
+    myCtx.expressionCounts()["subquery"]++;
+
+    // TODO Collect expression stats from the subquery.
   }
 };
 

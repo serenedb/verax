@@ -102,31 +102,32 @@ TEST_F(PlanPrinterTest, values) {
 
   lines = toSummaryLines(plan);
 
-  using namespace testing;
-
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
-          Eq("- LIMIT [5]: 1 fields: c BIGINT"),
-          Eq("      limit: 5"),
-          Eq("  - SORT [4]: 1 fields: c BIGINT"),
-          Eq("    - PROJECT [3]: 1 fields: c BIGINT"),
-          Eq("          expressions: call: 1, field: 2"),
-          Eq("          functions: plus: 1"),
-          Eq("          projections: 1 out of 1"),
-          Eq("      - PROJECT [2]: 2 fields: a BIGINT, b BIGINT"),
-          Eq("            expressions: call: 1, constant: 1, field: 2"),
-          Eq("            functions: plus: 1"),
-          Eq("            constants: BIGINT: 1"),
-          Eq("            projections: 1 out of 2"),
-          Eq("        - FILTER [1]: 1 fields: a BIGINT"),
-          Eq("              predicate: gt(a, 10)"),
-          Eq("              expressions: call: 1, constant: 1, field: 1"),
-          Eq("              functions: gt: 1"),
-          Eq("              constants: BIGINT: 1"),
-          Eq("          - VALUES [0]: 1 fields: a BIGINT"),
-          Eq("                rows: 1"),
-          Eq("")));
+          testing::Eq("- LIMIT [5]: 1 fields: c BIGINT"),
+          testing::Eq("      limit: 5"),
+          testing::Eq("  - SORT [4]: 1 fields: c BIGINT"),
+          testing::Eq("    - PROJECT [3]: 1 fields: c BIGINT"),
+          testing::Eq("          expressions: call: 1, field: 2"),
+          testing::Eq("          functions: plus: 1"),
+          testing::Eq("          projections: 1 out of 1"),
+          testing::Eq("      - PROJECT [2]: 2 fields: a BIGINT, b BIGINT"),
+          testing::Eq( "            expressions: call: 1, constant: 1, field: 2"),
+          testing::Eq("            functions: plus: 1"),
+          testing::Eq("            constants: BIGINT: 1"),
+          testing::Eq("            projections: 1 out of 2"),
+          testing::Eq("        - FILTER [1]: 1 fields: a BIGINT"),
+          testing::Eq("              predicate: gt(a, 10)"),
+          testing::Eq("              expressions: call: 1, constant: 1, field: 1"),
+          testing::Eq("              functions: gt: 1"),
+          testing::Eq("              constants: BIGINT: 1"),
+          testing::Eq("          - VALUES [0]: 1 fields: a BIGINT"),
+          testing::Eq("                rows: 1"),
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSkeletonLines(plan);
 
@@ -250,20 +251,21 @@ TEST_F(PlanPrinterTest, aggregate) {
 
   lines = toSummaryLines(plan);
 
-  using namespace testing;
-
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
-          Eq("- PROJECT [2]: 6 fields: a INTEGER, total BIGINT, mean DOUBLE, min INTEGER, expr BIGINT, ..."),
-          Eq("      expressions: call: 2, constant: 2, field: 6"),
-          Eq("      functions: multiply: 1, plus: 1"),
-          Eq("      constants: BIGINT: 1, DOUBLE: 1"),
-          Eq("      projections: 2 out of 6"),
-          Eq("  - AGGREGATE [1]: 4 fields: a INTEGER, total BIGINT, mean DOUBLE, min INTEGER"),
-          Eq("    - VALUES [0]: 2 fields: a INTEGER, b INTEGER"),
-          Eq("          rows: 4"),
-          Eq("")));
+          testing::Eq("- PROJECT [2]: 6 fields: a INTEGER, total BIGINT, mean DOUBLE, min INTEGER, expr BIGINT, ..."),
+          testing::Eq("      expressions: call: 2, constant: 2, field: 6"),
+          testing::Eq("      functions: multiply: 1, plus: 1"),
+          testing::Eq("      constants: BIGINT: 1, DOUBLE: 1"),
+          testing::Eq("      projections: 2 out of 6"),
+          testing::Eq("  - AGGREGATE [1]: 4 fields: a INTEGER, total BIGINT, mean DOUBLE, min INTEGER"),
+          testing::Eq("    - VALUES [0]: 2 fields: a INTEGER, b INTEGER"),
+          testing::Eq("          rows: 4"),
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSkeletonLines(plan);
 
@@ -311,21 +313,22 @@ TEST_F(PlanPrinterTest, union) {
 
   lines = toSummaryLines(plan);
 
-  using namespace testing;
-
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
-          Eq("- PROJECT [3]: 3 fields: a INTEGER, b DOUBLE, expr DOUBLE"),
-          Eq("      expressions: CAST: 1, call: 1, field: 4"),
-          Eq("      functions: plus: 1"),
-          Eq("      projections: 1 out of 3"),
-          Eq("  - UNION ALL [2]: 2 fields: a INTEGER, b DOUBLE"),
-          Eq("    - VALUES [0]: 2 fields: a INTEGER, b DOUBLE"),
-          Eq("          rows: 2"),
-          Eq("    - VALUES [1]: 2 fields: a_0 INTEGER, b_1 DOUBLE"),
-          Eq("          rows: 2"),
-          Eq("")));
+          testing::Eq("- PROJECT [3]: 3 fields: a INTEGER, b DOUBLE, expr DOUBLE"),
+          testing::Eq("      expressions: CAST: 1, call: 1, field: 4"),
+          testing::Eq("      functions: plus: 1"),
+          testing::Eq("      projections: 1 out of 3"),
+          testing::Eq("  - UNION ALL [2]: 2 fields: a INTEGER, b DOUBLE"),
+          testing::Eq("    - VALUES [0]: 2 fields: a INTEGER, b DOUBLE"),
+          testing::Eq("          rows: 2"),
+          testing::Eq("    - VALUES [1]: 2 fields: a_0 INTEGER, b_1 DOUBLE"),
+          testing::Eq("          rows: 2"),
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSkeletonLines(plan);
 
@@ -335,6 +338,134 @@ TEST_F(PlanPrinterTest, union) {
           testing::Eq("- UNION ALL [2]: 2 fields"),
           testing::Eq("  - VALUES [0]: 2 fields"),
           testing::Eq("  - VALUES [1]: 2 fields"),
+          testing::Eq("")));
+}
+
+TEST_F(PlanPrinterTest, subquery) {
+  std::vector<Variant> data{
+      Variant::row({1}),
+      Variant::row({2}),
+      Variant::row({3}),
+  };
+
+  std::vector<Variant> lookup{
+      Variant::row({1, 10}),
+      Variant::row({2, 20}),
+  };
+
+  auto context = PlanBuilder::Context();
+
+  // Subquery in a project.
+  PlanBuilder::Scope scope;
+  auto plan =
+      PlanBuilder(context)
+          .values(ROW({"a"}, {INTEGER()}), data)
+          .as("l")
+          .captureScope(scope)
+          .with({
+              Col("a") + 1,
+              Subquery(
+                  PlanBuilder(context, scope)
+                      .values(ROW({"a", "b"}, {INTEGER(), INTEGER()}), lookup)
+                      .as("r")
+                      .filter("l.a = r.a")
+                      .aggregate({}, {"sum(b)"})
+                      .build()),
+          })
+          .build();
+
+  auto lines = toLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::StartsWith("- Project:"),
+          testing::StartsWith("    a := a"),
+          testing::StartsWith("    expr := expr"),
+          testing::StartsWith("    sum := sum_1"),
+          testing::StartsWith("  - Project:"),
+          testing::StartsWith("      a := a"),
+          testing::StartsWith("      expr := plus(a, 1)"),
+          testing::StartsWith("      sum_1 := subquery"),
+          testing::StartsWith("    - Values: 3 rows"),
+          testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      // clang-format off
+      testing::ElementsAre(
+          testing::Eq("- PROJECT [5]: 3 fields: a INTEGER, expr INTEGER, sum BIGINT"),
+          testing::Eq("      expressions: field: 3"),
+          testing::Eq("  - PROJECT [4]: 3 fields: a INTEGER, expr INTEGER, sum_1 BIGINT"),
+          testing::Eq("        expressions: call: 1, constant: 1, field: 2, subquery: 1"),
+          testing::Eq("        functions: plus: 1"),
+          testing::Eq("        constants: INTEGER: 1"),
+          testing::Eq("        projections: 2 out of 3"),
+          testing::Eq("    - VALUES [0]: 1 fields: a INTEGER"),
+          testing::Eq("          rows: 3"),
+          testing::Eq(""))
+      // clang-format on
+  );
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- VALUES [0]: 1 fields"), testing::Eq("")));
+
+  // Subquery in a filter.
+  context = PlanBuilder::Context();
+  plan =
+      PlanBuilder(context)
+          .values(ROW({"a"}, {INTEGER()}), data)
+          .as("l")
+          .captureScope(scope)
+          .filter(
+              Col("a") >
+              Subquery(
+                  PlanBuilder(context, scope)
+                      .values(ROW({"a", "b"}, {INTEGER(), INTEGER()}), lookup)
+                      .as("r")
+                      .filter("l.a = r.a")
+                      .aggregate({}, {"max(b)"})
+                      .build()))
+          .build();
+
+  lines = toLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::StartsWith("- Filter: gt(a, subquery"),
+          testing::StartsWith("  - Values: 3 rows"),
+          testing::Eq("")));
+
+  lines = toSummaryLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      // clang-format off
+      testing::ElementsAre(
+          testing::Eq("- FILTER [4]: 1 fields: a INTEGER"),
+          testing::Eq("      predicate: gt(a, subquery(- Aggregate() -> ROW<max:INTEGER>  ..."),
+          testing::Eq("      expressions: call: 1, field: 1, subquery: 1"),
+          testing::Eq("      functions: gt: 1"),
+          testing::Eq("  - VALUES [0]: 1 fields: a INTEGER"),
+          testing::Eq("        rows: 3"),
+          testing::Eq(""))
+      // clang-format on
+  );
+
+  lines = toSkeletonLines(plan);
+
+  EXPECT_THAT(
+      lines,
+      testing::ElementsAre(
+          testing::Eq("- FILTER [4]: 1 fields"),
+          testing::Eq("  - VALUES [0]: 1 fields"),
           testing::Eq("")));
 }
 
@@ -382,22 +513,23 @@ TEST_F(PlanPrinterTest, join) {
 
   lines = toSummaryLines(plan);
 
-  using namespace testing;
-
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
-          Eq("- PROJECT [3]: 5 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER, z INTEGER"),
-          Eq("      expressions: call: 1, field: 6"),
-          Eq("      functions: plus: 1"),
-          Eq("      projections: 1 out of 5"),
-          Eq("  - JOIN LEFT [2]: 4 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER"),
-          Eq("        condition: eq(key, key_0)"),
-          Eq("    - VALUES [0]: 2 fields: key INTEGER, v INTEGER"),
-          Eq("          rows: 4"),
-          Eq("    - VALUES [1]: 2 fields: key_0 INTEGER, w INTEGER"),
-          Eq("          rows: 2"),
-          Eq("")));
+          testing::Eq("- PROJECT [3]: 5 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER, z INTEGER"),
+          testing::Eq("      expressions: call: 1, field: 6"),
+          testing::Eq("      functions: plus: 1"),
+          testing::Eq("      projections: 1 out of 5"),
+          testing::Eq("  - JOIN LEFT [2]: 4 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER"),
+          testing::Eq("        condition: eq(key, key_0)"),
+          testing::Eq("    - VALUES [0]: 2 fields: key INTEGER, v INTEGER"),
+          testing::Eq("          rows: 4"),
+          testing::Eq("    - VALUES [1]: 2 fields: key_0 INTEGER, w INTEGER"),
+          testing::Eq("          rows: 2"),
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSkeletonLines(plan);
 
@@ -453,21 +585,22 @@ TEST_F(PlanPrinterTest, crossJoin) {
 
   lines = toSummaryLines(plan);
 
-  using namespace testing;
-
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
-          Eq("- PROJECT [3]: 5 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER, z INTEGER"),
-          Eq("      expressions: call: 1, field: 6"),
-          Eq("      functions: plus: 1"),
-          Eq("      projections: 1 out of 5"),
-          Eq("  - JOIN INNER [2]: 4 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER"),
-          Eq("    - VALUES [0]: 2 fields: key INTEGER, v INTEGER"),
-          Eq("          rows: 3"),
-          Eq("    - VALUES [1]: 2 fields: key_0 INTEGER, w INTEGER"),
-          Eq("          rows: 2"),
-          Eq("")));
+          testing::Eq("- PROJECT [3]: 5 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER, z INTEGER"),
+          testing::Eq("      expressions: call: 1, field: 6"),
+          testing::Eq("      functions: plus: 1"),
+          testing::Eq("      projections: 1 out of 5"),
+          testing::Eq("  - JOIN INNER [2]: 4 fields: key INTEGER, v INTEGER, key_0 INTEGER, w INTEGER"),
+          testing::Eq("    - VALUES [0]: 2 fields: key INTEGER, v INTEGER"),
+          testing::Eq("          rows: 3"),
+          testing::Eq("    - VALUES [1]: 2 fields: key_0 INTEGER, w INTEGER"),
+          testing::Eq("          rows: 2"),
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSkeletonLines(plan);
 
@@ -540,46 +673,50 @@ TEST_F(PlanPrinterTest, specialForms) {
 
   lines = toSummaryLines(plan);
 
-  using namespace testing;
-
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
-          Eq("- PROJECT [2]: 10 fields: a BOOLEAN, b BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
-          Eq("      expressions: field: 10"),
-          Eq("  - PROJECT [1]: 10 fields: a_0 BOOLEAN, b_1 BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
-          Eq("        expressions: AND: 1, CAST: 6, COALESCE: 1, DEREFERENCE: 2, IF: 1, OR: 1, SWITCH: 1, TRY: 1, TRY_CAST: 1, call: 10, constant: 11, field: 21"),
-          Eq("        functions: divide: 2, eq: 2, gt: 4, lt: 1, multiply: 1"),
-          Eq("        constants: BIGINT: 5, DOUBLE: 1, INTEGER: 1, VARCHAR: 4"),
-          Eq("        projections: 8 out of 10"),
-          Eq("        dereferences: 2 out of 10"),
-          Eq("    - VALUES [0]: 3 fields: a INTEGER, b INTEGER, c ROW(2)"),
-          Eq("          rows: 4"),
-          Eq("")));
+          testing::Eq("- PROJECT [2]: 10 fields: a BOOLEAN, b BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
+          testing::Eq("      expressions: field: 10"),
+          testing::Eq("  - PROJECT [1]: 10 fields: a_0 BOOLEAN, b_1 BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
+          testing::Eq("        expressions: AND: 1, CAST: 6, COALESCE: 1, DEREFERENCE: 2, IF: 1, OR: 1, SWITCH: 1, TRY: 1, TRY_CAST: 1, call: 10, constant: 11, field: 21"),
+          testing::Eq("        functions: divide: 2, eq: 2, gt: 4, lt: 1, multiply: 1"),
+          testing::Eq("        constants: BIGINT: 5, DOUBLE: 1, INTEGER: 1, VARCHAR: 4"),
+          testing::Eq("        projections: 8 out of 10"),
+          testing::Eq("        dereferences: 2 out of 10"),
+          testing::Eq("    - VALUES [0]: 3 fields: a INTEGER, b INTEGER, c ROW(2)"),
+          testing::Eq("          rows: 4"),
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSummaryLines(
       plan, {.project = {.maxProjections = 3, .maxDereferences = 1}});
 
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
-          Eq("- PROJECT [2]: 10 fields: a BOOLEAN, b BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
-          Eq("      expressions: field: 10"),
-          Eq("  - PROJECT [1]: 10 fields: a_0 BOOLEAN, b_1 BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
-          Eq("        expressions: AND: 1, CAST: 6, COALESCE: 1, DEREFERENCE: 2, IF: 1, OR: 1, SWITCH: 1, TRY: 1, TRY_CAST: 1, call: 10, constant: 11, field: 21"),
-          Eq("        functions: divide: 2, eq: 2, gt: 4, lt: 1, multiply: 1"),
-          Eq("        constants: BIGINT: 5, DOUBLE: 1, INTEGER: 1, VARCHAR: 4"),
-          Eq("        projections: 8 out of 10"),
-          Eq("          a_0: AND(gt(a, b), gt(b, CAST(10 AS INTEGER)))"),
-          Eq("          b_1: OR(lt(a, b), gt(b, CAST(0 AS INTEGER)))"),
-          Eq("          expr: multiply(CAST(a AS DOUBLE), 1.2)"),
-          Eq("          ... 5 more"),
-          Eq("        dereferences: 2 out of 10"),
-          Eq("          expr_4: DEREFERENCE(c, x)"),
-          Eq("          ... 1 more"),
-          Eq("    - VALUES [0]: 3 fields: a INTEGER, b INTEGER, c ROW(2)"),
-          Eq("          rows: 4"),
-          Eq("")));
+          testing::Eq("- PROJECT [2]: 10 fields: a BOOLEAN, b BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
+          testing::Eq("      expressions: field: 10"),
+          testing::Eq("  - PROJECT [1]: 10 fields: a_0 BOOLEAN, b_1 BOOLEAN, expr DOUBLE, expr_2 VARCHAR, expr_3 INTEGER, ..."),
+          testing::Eq("        expressions: AND: 1, CAST: 6, COALESCE: 1, DEREFERENCE: 2, IF: 1, OR: 1, SWITCH: 1, TRY: 1, TRY_CAST: 1, call: 10, constant: 11, field: 21"),
+          testing::Eq("        functions: divide: 2, eq: 2, gt: 4, lt: 1, multiply: 1"),
+          testing::Eq("        constants: BIGINT: 5, DOUBLE: 1, INTEGER: 1, VARCHAR: 4"),
+          testing::Eq("        projections: 8 out of 10"),
+          testing::Eq( "          a_0: AND(gt(a, b), gt(b, CAST(10 AS INTEGER)))"),
+          testing::Eq("          b_1: OR(lt(a, b), gt(b, CAST(0 AS INTEGER)))"),
+          testing::Eq("          expr: multiply(CAST(a AS DOUBLE), 1.2)"),
+          testing::Eq("          ... 5 more"),
+          testing::Eq("        dereferences: 2 out of 10"),
+          testing::Eq("          expr_4: DEREFERENCE(c, x)"),
+          testing::Eq("          ... 1 more"),
+          testing::Eq("    - VALUES [0]: 3 fields: a INTEGER, b INTEGER, c ROW(2)"),
+          testing::Eq("          rows: 4"),
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSkeletonLines(plan);
 
@@ -605,28 +742,31 @@ TEST_F(PlanPrinterTest, lambda) {
 
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
           testing::StartsWith("- Project"),
-          testing::StartsWith(
-              "    expr := filter(sequence(CAST(1 AS BIGINT), a), x -> gt(x, b))"),
+          testing::StartsWith("    expr := filter(sequence(CAST(1 AS BIGINT), a), x -> gt(x, b))"),
           testing::StartsWith("  - Values"),
-          testing::Eq("")));
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSummaryLines(plan);
 
-  using namespace testing;
-
   EXPECT_THAT(
       lines,
+      // clang-format off
       testing::ElementsAre(
-          Eq("- PROJECT [1]: 1 fields: expr ARRAY"),
-          Eq("      expressions: CAST: 1, call: 3, constant: 1, field: 3, lambda: 1"),
-          Eq("      functions: filter: 1, gt: 1, sequence: 1"),
-          Eq("      constants: BIGINT: 1"),
-          Eq("      projections: 1 out of 1"),
-          Eq("  - VALUES [0]: 2 fields: a BIGINT, b BIGINT"),
-          Eq("        rows: 2"),
-          Eq("")));
+          testing::Eq("- PROJECT [1]: 1 fields: expr ARRAY"),
+          testing::Eq("      expressions: CAST: 1, call: 3, constant: 1, field: 3, lambda: 1"),
+          testing::Eq("      functions: filter: 1, gt: 1, sequence: 1"),
+          testing::Eq("      constants: BIGINT: 1"),
+          testing::Eq("      projections: 1 out of 1"),
+          testing::Eq("  - VALUES [0]: 2 fields: a BIGINT, b BIGINT"),
+          testing::Eq("        rows: 2"),
+          testing::Eq(""))
+      // clang-format on
+  );
 
   lines = toSkeletonLines(plan);
 

@@ -15,6 +15,7 @@
  */
 
 #include "axiom/logical_plan/ExprPrinter.h"
+#include "axiom/logical_plan/PlanPrinter.h"
 
 namespace facebook::velox::logical_plan {
 
@@ -98,10 +99,15 @@ class ToTextVisitor : public ExprVisitor {
     expr.body()->accept(*this, context);
   }
 
-  void visit(const SubqueryExpr& /* expr */, ExprVisitorContext& /* context */)
+  void visit(const SubqueryExpr& expr, ExprVisitorContext& context)
       const override {
-    // TODO Implement.
-    VELOX_NYI();
+    auto& out = toOut(context);
+
+    // TODO Produce a single-line subquery text: Aggregate(keys, aggs) ->
+    // Filter(condition) -> TableScan(t).
+    auto text = PlanPrinter::toText(*expr.subquery());
+    std::replace(text.begin(), text.end(), '\n', ' ');
+    out << "subquery(" << text << ")";
   }
 
  private:
