@@ -353,15 +353,16 @@ class Optimization;
 /// Tracks the set of tables / columns that have been placed or are still needed
 /// when constructing a partial plan.
 struct PlanState {
-  PlanState(Optimization& optimization, DerivedTableP dt)
+  PlanState(Optimization& optimization, DerivedTableCP dt)
       : optimization(optimization), dt(dt) {}
 
-  PlanState(Optimization& optimization, DerivedTableP dt, PlanPtr plan)
+  PlanState(Optimization& optimization, DerivedTableCP dt, PlanPtr plan)
       : optimization(optimization), dt(dt), cost(plan->cost) {}
 
   Optimization& optimization;
+
   // The derived table from which the tables are drawn.
-  DerivedTableP dt{nullptr};
+  DerivedTableCP dt{nullptr};
 
   // The tables that have been placed so far.
   PlanObjectSet placed;
@@ -1096,11 +1097,11 @@ class Optimization {
 
   // Adds group by, order by, top k to 'plan'. Updates 'plan' if
   // relation ops added.  Sets cost in 'state'.
-  void addPostprocess(DerivedTableP dt, RelationOpPtr& plan, PlanState& state);
+  void addPostprocess(DerivedTableCP dt, RelationOpPtr& plan, PlanState& state);
 
   // Places a derived table as first table in a plan. Imports possibly reducing
   // joins into the plan if can.
-  void placeDerivedTable(const DerivedTable* from, PlanState& state);
+  void placeDerivedTable(DerivedTableCP from, PlanState& state);
 
   // Adds the items from 'dt.conjuncts' that are not placed in 'state'
   // and whose prerequisite columns are placed. If conjuncts can be
@@ -1124,7 +1125,7 @@ class Optimization {
   // Adds a cross join to access a single row from a non-correlated subquery.
   RelationOpPtr placeSingleRowDt(
       RelationOpPtr plan,
-      const DerivedTable* subq,
+      DerivedTableCP subq,
       ExprCP filter,
       PlanState& state);
 

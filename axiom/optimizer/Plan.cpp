@@ -379,7 +379,7 @@ PlanPtr PlanSet::best(const Distribution& distribution, bool& needsShuffle) {
   return best;
 }
 
-float startingScore(PlanObjectCP table, DerivedTableP /*dt*/) {
+float startingScore(PlanObjectCP table) {
   if (table->type() == PlanType::kTable) {
     return table->as<BaseTable>()
         ->schemaTable->columnGroups[0]
@@ -803,7 +803,7 @@ RelationOpPtr repartitionForAgg(const RelationOpPtr& plan, PlanState& state) {
   Distribution distribution(
       plan->distribution().distributionType,
       plan->resultCardinality(),
-      keyValues);
+      std::move(keyValues));
   auto* repartition =
       make<Repartition>(plan, std::move(distribution), plan->columns());
   state.addCost(*repartition);
@@ -811,7 +811,7 @@ RelationOpPtr repartitionForAgg(const RelationOpPtr& plan, PlanState& state) {
 }
 
 void Optimization::addPostprocess(
-    DerivedTableP dt,
+    DerivedTableCP dt,
     RelationOpPtr& plan,
     PlanState& state) {
   if (dt->aggregation) {
@@ -1626,7 +1626,7 @@ void Optimization::makeJoins(RelationOpPtr plan, PlanState& state) {
     for (auto i = 0; i < firstTables.size(); ++i) {
       auto table = firstTables[i];
       state.setFirstTable(table->id());
-      scores.at(i) = startingScore(table, dt);
+      scores.at(i) = startingScore(table);
     }
     std::vector<int32_t> ids(firstTables.size());
     std::iota(ids.begin(), ids.end(), 0);

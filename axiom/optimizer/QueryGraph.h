@@ -999,6 +999,7 @@ struct DerivedTable : public PlanObject {
 };
 
 using DerivedTableP = DerivedTable*;
+using DerivedTableCP = const DerivedTable*;
 
 float tableCardinality(PlanObjectCP table);
 
