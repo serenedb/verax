@@ -633,7 +633,7 @@ class Optimization {
   // these in scanColumns. The scan->columns() is the leaf columns,
   // not the top level ones if subfield pushdown.
   RowTypePtr scanOutputType(
-      TableScan& scan,
+      const TableScan& scan,
       ColumnVector& scanColumns,
       std::unordered_map<ColumnCP, TypePtr>& typeMap);
 
@@ -645,8 +645,8 @@ class Optimization {
 
   // Makes projections for subfields as top level columns.
   core::PlanNodePtr makeSubfieldProjections(
-      TableScan& scan,
-      const std::shared_ptr<const core::TableScanNode>& scanNode);
+      const TableScan& scan,
+      const core::TableScanNodePtr& scanNode);
 
   /// Sets 'filterSelectivity' of 'baseTable' from history. Returns True if set.
   /// 'scanType' is the set of sampled columns with possible map to struct cast.
@@ -1190,32 +1190,32 @@ class Optimization {
   // Makes partial + final order by fragments for order by with and without
   // limit.
   velox::core::PlanNodePtr makeOrderBy(
-      OrderBy& op,
+      const OrderBy& op,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
   velox::core::PlanNodePtr makeScan(
-      TableScan& scan,
+      const TableScan& scan,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
   velox::core::PlanNodePtr makeFilter(
-      Filter& filter,
+      const Filter& filter,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
   velox::core::PlanNodePtr makeProject(
-      Project& project,
+      const Project& project,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
   velox::core::PlanNodePtr makeJoin(
-      Join& join,
+      const Join& join,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
   velox::core::PlanNodePtr makeRepartition(
-      Repartition& repartition,
+      const Repartition& repartition,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
@@ -1226,7 +1226,7 @@ class Optimization {
   // fragments are referenced from 'fragment' via
   // 'inputStages' and are returned in 'stages'.
   velox::core::PlanNodePtr makeFragment(
-      RelationOpPtr op,
+      const RelationOpPtr& op,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
@@ -1239,11 +1239,11 @@ class Optimization {
   // Returns a stack of parallel project nodes if parallelization makes sense.
   // nullptr means use regular ProjectNode in output.
   velox::core::PlanNodePtr maybeParallelProject(
-      Project* op,
+      const Project* op,
       core::PlanNodePtr input);
 
   core::PlanNodePtr makeParallelProject(
-      core::PlanNodePtr input,
+      const core::PlanNodePtr& input,
       const PlanObjectSet& topExprs,
       const PlanObjectSet& placed,
       const PlanObjectSet& extraColumns);

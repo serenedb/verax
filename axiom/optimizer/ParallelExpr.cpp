@@ -105,7 +105,7 @@ PlanObjectSet makeCseBorder(
 } // namespace
 
 core::PlanNodePtr Optimization::makeParallelProject(
-    core::PlanNodePtr input,
+    const core::PlanNodePtr& input,
     const PlanObjectSet& topExprs,
     const PlanObjectSet& placed,
     const PlanObjectSet& extraColumns) {
@@ -265,7 +265,7 @@ float parallelBorder(
 } // namespace
 
 core::PlanNodePtr Optimization::maybeParallelProject(
-    Project* project,
+    const Project* project,
     core::PlanNodePtr input) {
   PlanObjectSet top;
   PlanObjectSet allColumns;
