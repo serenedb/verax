@@ -28,13 +28,25 @@ namespace facebook::velox::optimizer {
 
 namespace lp = facebook::velox::logical_plan;
 
+namespace {
+std::string leString(const lp::Expr* e) {
+  return lp::ExprPrinter::toText(*e);
+}
+
+std::string pString(const lp::LogicalPlanNode* p) {
+  return lp::PlanPrinter::toText(*p);
+}
+
+} // namespace
+
 void Optimization::setDerivedTableOutput(
     DerivedTableP dt,
     const lp::LogicalPlanNode& planNode) {
-  auto& outputType = planNode.outputType();
+  const auto& outputType = planNode.outputType();
   for (auto i = 0; i < outputType->size(); ++i) {
-    auto fieldType = outputType->childAt(i);
-    auto fieldName = outputType->nameOf(i);
+    const auto& fieldType = outputType->childAt(i);
+    const auto& fieldName = outputType->nameOf(i);
+
     auto expr = translateColumn(fieldName);
     Value value(toType(fieldType), 0);
     auto* column = make<Column>(toName(fieldName), dt, value);
@@ -46,24 +58,13 @@ void Optimization::setDerivedTableOutput(
 
 DerivedTableP Optimization::makeQueryGraphFromLogical() {
   markAllSubfields(logicalPlan_->outputType().get(), logicalPlan_);
-  auto* root = make<DerivedTable>();
-  root_ = root;
+
+  root_ = newDt();
   currentSelect_ = root_;
-  root->cname = toName(fmt::format("dt{}", ++nameCounter_));
+
   makeQueryGraph(*logicalPlan_, kAllAllowedInDt);
   return root_;
 }
-
-namespace {
-
-const std::string* columnName(const lp::Expr& expr) {
-  if (expr.isInputReference()) {
-    return &expr.asUnchecked<lp::InputReferenceExpr>()->name();
-  }
-  return nullptr;
-}
-
-} // namespace
 
 void Optimization::translateConjuncts(
     const lp::ExprPtr& input,
@@ -565,9 +566,10 @@ const char* specialFormCallName(const lp::SpecialFormExpr* form) {
 } // namespace
 
 ExprCP Optimization::translateExpr(const lp::ExprPtr& expr) {
-  if (auto name = columnName(*expr)) {
-    return translateColumn(*name);
+  if (expr->isInputReference()) {
+    return translateColumn(expr->asUnchecked<lp::InputReferenceExpr>()->name());
   }
+
   if (expr->isConstant()) {
     return makeConstant(*expr->asUnchecked<lp::ConstantExpr>());
   }
@@ -728,11 +730,11 @@ std::optional<ExprCP> Optimization::translateSubfieldFunction(
 }
 
 ExprCP Optimization::translateColumn(const std::string& name) {
-  auto column = renames_.find(name);
-  if (column != renames_.end()) {
-    return column->second;
+  auto it = renames_.find(name);
+  if (it != renames_.end()) {
+    return it->second;
   }
-  VELOX_FAIL("could not resolve name {}", name);
+  VELOX_FAIL("Cannot resolve column name: {}", name);
 }
 
 ExprVector Optimization::translateColumns(
@@ -818,7 +820,7 @@ AggregationP Optimization::translateAggregation(
   return aggregation;
 }
 
-OrderByP Optimization::translateOrderBy(const lp::SortNode& order) {
+PlanObjectP Optimization::addOrderBy(const lp::SortNode& order) {
   OrderTypeVector orderType;
   ExprVector keys;
   for (auto& field : order.ordering()) {
@@ -832,19 +834,23 @@ OrderByP Optimization::translateOrderBy(const lp::SortNode& order) {
     keys.push_back(translateExpr(field.expression));
   }
 
-  return make<OrderBy>(nullptr, keys, orderType);
+  currentSelect_->orderBy = make<OrderBy>(nullptr, keys, orderType);
+  return currentSelect_;
 }
 
 void Optimization::translateJoin(const lp::JoinNode& join) {
-  auto joinLeft = join.left();
-  auto joinRight = join.right();
+  const auto& joinLeft = join.left();
+  const auto& joinRight = join.right();
 
-  auto joinType = join.joinType();
-  bool isInner = joinType == lp::JoinType::kInner;
+  const auto joinType = join.joinType();
+  const bool isInner = joinType == lp::JoinType::kInner;
+
   makeQueryGraph(*joinLeft, allow(PlanType::kJoin));
+
   // For an inner join a join tree on the right can be flattened, for all other
   // kinds it must be kept together in its own dt.
   makeQueryGraph(*joinRight, isInner ? allow(PlanType::kJoin) : 0);
+
   ExprVector conjuncts;
   translateConjuncts(join.condition(), conjuncts);
 
@@ -852,21 +858,26 @@ void Optimization::translateJoin(const lp::JoinNode& join) {
     currentSelect_->conjuncts.insert(
         currentSelect_->conjuncts.end(), conjuncts.begin(), conjuncts.end());
   } else {
-    bool leftOptional =
+    const bool leftOptional =
         joinType == lp::JoinType::kRight || joinType == lp::JoinType::kFull;
-    bool rightOptional =
+    const bool rightOptional =
         joinType == lp::JoinType::kLeft || joinType == lp::JoinType::kFull;
-    ExprVector leftKeys;
-    ExprVector rightKeys;
-    PlanObjectSet leftTables;
+
     // If non-inner, and many tables on the right they are one dt. If a single
     // table then this too is the last in 'tables'.
     auto rightTable = currentSelect_->tables.back();
+
+    ExprVector leftKeys;
+    ExprVector rightKeys;
+    PlanObjectSet leftTables;
     extractNonInnerJoinEqualities(
         conjuncts, rightTable, leftKeys, rightKeys, leftTables);
+
     std::vector<PlanObjectCP> leftTableVector;
+    leftTableVector.reserve(leftTables.size());
     leftTables.forEach(
         [&](PlanObjectCP table) { leftTableVector.push_back(table); });
+
     auto* edge = make<JoinEdge>(
         leftTableVector.size() == 1 ? leftTableVector[0] : nullptr,
         rightTable,
@@ -882,74 +893,66 @@ void Optimization::translateJoin(const lp::JoinNode& join) {
   }
 }
 
-namespace {
-
-bool isJoin(const lp::LogicalPlanNode& node) {
-  auto kind = node.kind();
-  if (kind == lp::NodeKind::kJoin) {
-    return true;
-  }
-  if (kind == lp::NodeKind::kFilter || kind == lp::NodeKind::kProject) {
-    return isJoin(*node.inputAt(0));
-  }
-  return false;
+DerivedTableP Optimization::newDt() {
+  auto* dt = make<DerivedTable>();
+  dt->cname = toName(fmt::format("dt{}", ++nameCounter_));
+  return dt;
 }
-
-bool isDirectOver(const lp::LogicalPlanNode& node, lp::NodeKind kind) {
-  auto source = node.inputAt(0);
-  return source && source->kind() == kind;
-}
-} // namespace
 
 PlanObjectP Optimization::wrapInDt(const lp::LogicalPlanNode& node) {
   DerivedTableP previousDt = currentSelect_;
-  auto* newDt = make<DerivedTable>();
-  auto cname = toName(fmt::format("dt{}", ++nameCounter_));
-  newDt->cname = cname;
-  currentSelect_ = newDt;
+  auto* dt = newDt();
+
+  currentSelect_ = dt;
   makeQueryGraph(node, kAllAllowedInDt);
 
   currentSelect_ = previousDt;
-  velox::RowTypePtr type = node.outputType();
-  // node.name() == "Aggregation" ? aggFinalType_ : node.outputType();
-  for (auto i : usedChannels(&node)) {
-    ExprCP inner = translateColumn(type->nameOf(i));
-    newDt->exprs.push_back(inner);
-    auto* outer = make<Column>(toName(type->nameOf(i)), newDt, inner->value());
-    newDt->columns.push_back(outer);
-    renames_[type->nameOf(i)] = outer;
-  }
-  currentSelect_->tables.push_back(newDt);
-  currentSelect_->tableSet.add(newDt);
-  newDt->makeInitialPlan();
 
-  return newDt;
+  const auto& type = node.outputType();
+  for (auto i : usedChannels(&node)) {
+    const auto& name = type->nameOf(i);
+
+    const auto* inner = translateColumn(name);
+    dt->exprs.push_back(inner);
+
+    const auto* outer = make<Column>(toName(name), dt, inner->value());
+    dt->columns.push_back(outer);
+    renames_[name] = outer;
+  }
+
+  currentSelect_->tables.push_back(dt);
+  currentSelect_->tableSet.add(dt);
+  dt->makeInitialPlan();
+
+  return dt;
 }
 
 PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode* tableScan) {
-  auto schemaTable = schema_.findTable(tableScan->tableName());
+  const auto* schemaTable = schema_.findTable(tableScan->tableName());
   VELOX_CHECK_NOT_NULL(
       schemaTable, "Table not found: {}", tableScan->tableName());
 
-  auto cname = fmt::format("t{}", ++nameCounter_);
-
   auto* baseTable = make<BaseTable>();
-  baseTable->cname = toName(cname);
+  baseTable->cname = toName(fmt::format("t{}", ++nameCounter_));
   baseTable->schemaTable = schemaTable;
   logicalPlanLeaves_[tableScan] = baseTable;
+
   auto channels = usedChannels(tableScan);
-  auto type = tableScan->outputType();
-  auto& names = tableScan->columnNames();
+  const auto& type = tableScan->outputType();
+  const auto& names = tableScan->columnNames();
   for (auto i = 0; i < type->size(); ++i) {
     if (std::find(channels.begin(), channels.end(), i) == channels.end()) {
       continue;
     }
-    auto schemaColumn = schemaTable->findColumn(names[i]);
+
+    const auto& name = names[i];
+    auto schemaColumn = schemaTable->findColumn(name);
     auto value = schemaColumn->value();
     auto* column =
-        make<Column>(toName(names[i]), baseTable, value, schemaColumn->name());
+        make<Column>(toName(name), baseTable, value, schemaColumn->name());
     baseTable->columns.push_back(column);
-    auto kind = column->value().type->kind();
+
+    const auto kind = column->value().type->kind();
     if (kind == TypeKind::ARRAY || kind == TypeKind::ROW ||
         kind == TypeKind::MAP) {
       BitSet allPaths;
@@ -973,6 +976,7 @@ PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode* tableScan) {
         }
       }
     }
+
     renames_[type->nameOf(i)] = column;
   }
 
@@ -1033,8 +1037,8 @@ void Optimization::makeSubfieldColumns(
   allColumnSubfields_[column] = std::move(projections);
 }
 
-void Optimization::addProjection(const lp::ProjectNode* project) {
-  logicalExprSource_ = project->inputAt(0).get();
+PlanObjectP Optimization::addProjection(const lp::ProjectNode* project) {
+  logicalExprSource_ = project->onlyInput().get();
   const auto& names = project->names();
   const auto& exprs = project->expressions();
   for (auto i : usedChannels(project)) {
@@ -1050,13 +1054,16 @@ void Optimization::addProjection(const lp::ProjectNode* project) {
     auto expr = translateExpr(exprs.at(i));
     renames_[names[i]] = expr;
   }
+
+  return currentSelect_;
 }
 
-void Optimization::addFilter(const lp::FilterNode* filter) {
-  logicalExprSource_ = filter->inputAt(0).get();
+PlanObjectP Optimization::addFilter(const lp::FilterNode* filter) {
+  logicalExprSource_ = filter->onlyInput().get();
+
   ExprVector flat;
   translateConjuncts(filter->predicate(), flat);
-  if (isDirectOver(*filter, lp::NodeKind::kAggregate)) {
+  if (logicalExprSource_->kind() == lp::NodeKind::kAggregate) {
     VELOX_CHECK(
         currentSelect_->having.empty(),
         "Must have all of HAVING in one filter");
@@ -1065,23 +1072,22 @@ void Optimization::addFilter(const lp::FilterNode* filter) {
     currentSelect_->conjuncts.insert(
         currentSelect_->conjuncts.end(), flat.begin(), flat.end());
   }
+
+  return currentSelect_;
 }
 
-PlanObjectP Optimization::addAggregation(
-    const lp::AggregateNode& aggNode,
-    uint64_t allowedInDt) {
-  using AggregateNode = lp::AggregateNode;
-  if (!contains(allowedInDt, PlanType::kAggregation)) {
-    return wrapInDt(aggNode);
-  }
+PlanObjectP Optimization::addAggregation(const lp::AggregateNode& aggNode) {
   aggFinalType_ = aggNode.outputType();
-  makeQueryGraph(
-      *aggNode.inputAt(0), makeDtIf(allowedInDt, PlanType::kAggregation));
-  auto agg = translateAggregation(aggNode);
-  if (agg) {
-    auto* aggPlan = make<AggregationPlan>(agg);
-    currentSelect_->aggregation = aggPlan;
-  }
+
+  auto* aggPlan = make<AggregationPlan>(translateAggregation(aggNode));
+  currentSelect_->aggregation = aggPlan;
+
+  return currentSelect_;
+}
+
+PlanObjectP Optimization::addLimit(const logical_plan::LimitNode& limitNode) {
+  currentSelect_->limit = limitNode.count();
+  currentSelect_->offset = limitNode.offset();
   return currentSelect_;
 }
 
@@ -1105,76 +1111,81 @@ bool hasNondeterministic(const lp::ExprPtr& expr) {
 PlanObjectP Optimization::makeQueryGraph(
     const lp::LogicalPlanNode& node,
     uint64_t allowedInDt) {
-  auto kind = node.kind();
-  if (kind == lp::NodeKind::kFilter &&
-      !contains(allowedInDt, PlanType::kFilter)) {
-    return wrapInDt(node);
-  }
+  switch (node.kind()) {
+    case lp::NodeKind::kValues:
+      VELOX_NYI(
+          "Unsupported PlanNode {}",
+          logical_plan::NodeKindName::toName(node.kind()));
 
-  if (kind == lp::NodeKind::kJoin && !contains(allowedInDt, PlanType::kJoin)) {
-    return wrapInDt(node);
-  }
-  if (kind == lp::NodeKind::kTableScan) {
-    return makeBaseTable(node.asUnchecked<lp::TableScanNode>());
-  }
-  if (kind == lp::NodeKind::kProject) {
-    makeQueryGraph(*node.inputAt(0), allowedInDt);
-    addProjection(node.asUnchecked<lp::ProjectNode>());
-    return currentSelect_;
-  }
-  if (kind == lp::NodeKind::kFilter) {
-    const auto* filter = node.asUnchecked<lp::FilterNode>();
-    if (!isNondeterministicWrap_ && hasNondeterministic(filter->predicate())) {
-      // Force wrap the filter and its input inside a dt so the filter
-      // does not get mixed with parrent nodes.
-      isNondeterministicWrap_ = true;
-      return makeQueryGraph(node, 0);
-    }
-    isNondeterministicWrap_ = false;
-    makeQueryGraph(*node.inputAt(0), allowedInDt);
-    addFilter(filter);
-    return currentSelect_;
-  }
-  if (kind == lp::NodeKind::kJoin) {
-    if (!contains(allowedInDt, PlanType::kJoin)) {
-      return wrapInDt(node);
-    }
-    translateJoin(*node.asUnchecked<lp::JoinNode>());
-    return currentSelect_;
-  }
-  if (kind == lp::NodeKind::kAggregate) {
-    return addAggregation(*node.asUnchecked<lp::AggregateNode>(), allowedInDt);
-  }
-  if (kind == lp::NodeKind::kSort) {
-    if (!contains(allowedInDt, PlanType::kOrderBy)) {
-      return wrapInDt(node);
-    }
-    makeQueryGraph(*node.inputAt(0), makeDtIf(allowedInDt, PlanType::kOrderBy));
-    currentSelect_->orderBy =
-        translateOrderBy(*node.asUnchecked<lp::SortNode>());
-    return currentSelect_;
-  }
-  if (kind == lp::NodeKind::kLimit) {
-    if (!contains(allowedInDt, PlanType::kLimit)) {
-      return wrapInDt(node);
-    }
-    makeQueryGraph(*node.inputAt(0), makeDtIf(allowedInDt, PlanType::kLimit));
-    const auto* limit = node.asUnchecked<lp::LimitNode>();
-    currentSelect_->limit = limit->count();
-    currentSelect_->offset = limit->offset();
-  } else {
-    VELOX_NYI(
-        "Unsupported PlanNode {}", logical_plan::NodeKindName::toName(kind));
-  }
-  return currentSelect_;
-}
+    case lp::NodeKind::kTableScan:
+      return makeBaseTable(node.asUnchecked<lp::TableScanNode>());
 
-std::string leString(const lp::Expr* e) {
-  return lp::ExprPrinter::toText(*e);
-}
+    case lp::NodeKind::kFilter: {
+      if (!contains(allowedInDt, PlanType::kFilter)) {
+        return wrapInDt(node);
+      }
 
-std::string pString(const lp::LogicalPlanNode* p) {
-  return lp::PlanPrinter::toText(*p);
+      const auto* filter = node.asUnchecked<lp::FilterNode>();
+      if (!isNondeterministicWrap_ &&
+          hasNondeterministic(filter->predicate())) {
+        // Force wrap the filter and its input inside a dt so the filter
+        // does not get mixed with parrent nodes.
+        isNondeterministicWrap_ = true;
+        return makeQueryGraph(node, 0);
+      }
+
+      isNondeterministicWrap_ = false;
+      makeQueryGraph(*node.onlyInput(), allowedInDt);
+      return addFilter(filter);
+    }
+
+    case lp::NodeKind::kProject:
+      makeQueryGraph(*node.onlyInput(), allowedInDt);
+      return addProjection(node.asUnchecked<lp::ProjectNode>());
+
+    case lp::NodeKind::kAggregate:
+      if (!contains(allowedInDt, PlanType::kAggregation)) {
+        return wrapInDt(node);
+      }
+
+      makeQueryGraph(
+          *node.onlyInput(), makeDtIf(allowedInDt, PlanType::kAggregation));
+      return addAggregation(*node.asUnchecked<lp::AggregateNode>());
+
+    case lp::NodeKind::kJoin:
+      if (!contains(allowedInDt, PlanType::kJoin)) {
+        return wrapInDt(node);
+      }
+
+      translateJoin(*node.asUnchecked<lp::JoinNode>());
+      return currentSelect_;
+
+    case lp::NodeKind::kSort:
+      if (!contains(allowedInDt, PlanType::kOrderBy)) {
+        return wrapInDt(node);
+      }
+
+      makeQueryGraph(
+          *node.onlyInput(), makeDtIf(allowedInDt, PlanType::kOrderBy));
+      return addOrderBy(*node.asUnchecked<lp::SortNode>());
+
+    case lp::NodeKind::kLimit: {
+      if (!contains(allowedInDt, PlanType::kLimit)) {
+        return wrapInDt(node);
+      }
+
+      makeQueryGraph(
+          *node.onlyInput(), makeDtIf(allowedInDt, PlanType::kLimit));
+      return addLimit(*node.asUnchecked<lp::LimitNode>());
+    }
+
+    case lp::NodeKind::kSet:
+      [[fallthrough]];
+    case lp::NodeKind::kUnnest:
+      VELOX_NYI(
+          "Unsupported PlanNode {}",
+          logical_plan::NodeKindName::toName(node.kind()));
+  }
 }
 
 } // namespace facebook::velox::optimizer

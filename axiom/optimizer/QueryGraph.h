@@ -391,7 +391,7 @@ class Call : public Expr {
   }
 
   Call(Name name, Value value, ExprVector args, FunctionSet functions)
-      : Call(PlanType::kCall, name, value, args, functions) {}
+      : Call(PlanType::kCall, name, value, std::move(args), functions) {}
 
   Name name() const {
     return name_;
@@ -411,6 +411,10 @@ class Call : public Expr {
 
   const ExprVector& args() const {
     return args_;
+  }
+
+  ExprCP argAt(size_t index) const {
+    return args_[index];
   }
 
   CPSpan<PlanObject> children() const override {
@@ -447,7 +451,9 @@ bool isCallExpr(ExprCP expr, Name name);
 class Lambda : public Expr {
  public:
   Lambda(ColumnVector args, const Type* type, ExprCP body)
-      : Expr(PlanType::kLambda, Value(type, 1)), args_(args), body_(body) {}
+      : Expr(PlanType::kLambda, Value(type, 1)),
+        args_(std::move(args)),
+        body_(body) {}
   const ColumnVector& args() const {
     return args_;
   }

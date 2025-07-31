@@ -791,13 +791,13 @@ class Optimization {
   // being assembled.
   void addProjection(const core::ProjectNode* project);
 
-  void addProjection(const logical_plan::ProjectNode* project);
+  PlanObjectP addProjection(const logical_plan::ProjectNode* project);
 
   // Interprets a Filter node and adds its information into the DerivedTable
   // being assembled.
   void addFilter(const core::FilterNode* Filter);
 
-  void addFilter(const logical_plan::FilterNode* Filter);
+  PlanObjectP addFilter(const logical_plan::FilterNode* Filter);
 
   // Interprets an AggregationNode and adds its information to the DerivedTable
   // being assembled.
@@ -805,9 +805,11 @@ class Optimization {
       const core::AggregationNode& aggNode,
       uint64_t allowedInDt);
 
-  PlanObjectP addAggregation(
-      const logical_plan::AggregateNode& aggNode,
-      uint64_t allowedInDt);
+  PlanObjectP addAggregation(const logical_plan::AggregateNode& aggNode);
+
+  PlanObjectP addLimit(const logical_plan::LimitNode& limitNode);
+
+  PlanObjectP addOrderBy(const logical_plan::SortNode& order);
 
   // Sets the columns to project out from the root DerivedTable  based on
   // 'plan'.
@@ -1042,8 +1044,6 @@ class Optimization {
   // Adds order by information to the enclosing DerivedTable.
   OrderByP translateOrderBy(const velox::core::OrderByNode& order);
 
-  OrderByP translateOrderBy(const logical_plan::SortNode& order);
-
   // Adds aggregation information to the enclosing DerivedTable.
   AggregationP translateAggregation(
       const velox::core::AggregationNode& aggregation);
@@ -1058,6 +1058,8 @@ class Optimization {
   PlanObjectP wrapInDt(const velox::core::PlanNode& node);
 
   PlanObjectP wrapInDt(const logical_plan::LogicalPlanNode& node);
+
+  DerivedTableP newDt();
 
   /// Retrieves or makes a plan from 'key'. 'key' specifies a set of
   /// top level joined tables or a hash join build side table or

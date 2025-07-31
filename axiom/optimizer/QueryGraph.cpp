@@ -280,8 +280,7 @@ bool Expr::sameOrEqual(const Expr& other) const {
         return false;
       }
     }
-      // Fall through.
-      FMT_FALLTHROUGH;
+      [[fallthrough]];
     case PlanType::kCall: {
       if (as<Call>()->name() != other.as<Call>()->name()) {
         return false;
@@ -291,7 +290,7 @@ bool Expr::sameOrEqual(const Expr& other) const {
         return false;
       }
       for (auto i = 0; i < numArgs; ++i) {
-        if (as<Call>()->args()[i]->sameOrEqual(*other.as<Call>()->args()[i])) {
+        if (as<Call>()->argAt(i)->sameOrEqual(*other.as<Call>()->argAt(i))) {
           return false;
         }
       }
@@ -740,7 +739,7 @@ importExpr(ExprCP expr, const ColumnVector& outer, const ExprVector& inner) {
         return copy;
       }
     }
-      FMT_FALLTHROUGH;
+      [[fallthrough]];
     default:
       VELOX_UNREACHABLE();
   }
@@ -1026,8 +1025,8 @@ bool isJoinEquality(
   if (expr->type() == PlanType::kCall) {
     auto call = expr->as<Call>();
     if (call->name() == toName("eq")) {
-      left = call->args()[0];
-      right = call->args()[1];
+      left = call->argAt(0);
+      right = call->argAt(1);
       auto leftTable = singleTable(left);
       auto rightTable = singleTable(right);
       if (!leftTable || !rightTable) {
@@ -1048,26 +1047,27 @@ void extractNonInnerJoinEqualities(
     ExprVector& leftKeys,
     ExprVector& rightKeys,
     PlanObjectSet& allLeft) {
+  const auto* eq = toName("eq");
+
   for (auto i = 0; i < conjuncts.size(); ++i) {
-    auto* eq = toName("eq");
-    auto conjunct = conjuncts[i];
+    const auto* conjunct = conjuncts[i];
     if (isCallExpr(conjunct, eq)) {
       auto eq = conjunct->as<Call>();
-      auto leftTables = eq->args()[0]->allTables();
-      auto rightTables = eq->args()[1]->allTables();
+      auto leftTables = eq->argAt(0)->allTables();
+      auto rightTables = eq->argAt(1)->allTables();
       if (rightTables.size() == 1 && rightTables.contains(right) &&
           !leftTables.contains(right)) {
         allLeft.unionSet(leftTables);
-        leftKeys.push_back(eq->args()[0]);
-        rightKeys.push_back(eq->args()[1]);
+        leftKeys.push_back(eq->argAt(0));
+        rightKeys.push_back(eq->argAt(1));
         conjuncts.erase(conjuncts.begin() + i);
         --i;
       } else if (
           leftTables.size() == 1 && leftTables.contains(right) &&
           !rightTables.contains(right)) {
         allLeft.unionSet(rightTables);
-        leftKeys.push_back(eq->args()[1]);
-        rightKeys.push_back(eq->args()[0]);
+        leftKeys.push_back(eq->argAt(1));
+        rightKeys.push_back(eq->argAt(0));
         conjuncts.erase(conjuncts.begin() + i);
         --i;
       }
