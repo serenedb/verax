@@ -228,10 +228,107 @@ class ExprStats : public ExprVisitorContext {
     return constantCounts_;
   }
 
+  void merge(const ExprStats& other) {
+    for (const auto& [name, count] : other.functionCounts()) {
+      functionCounts_[name] += count;
+    }
+
+    for (const auto& [name, count] : other.expressionCounts()) {
+      expressionCounts_[name] += count;
+    }
+
+    for (const auto& [type, count] : other.constantCounts()) {
+      constantCounts_[type] += count;
+    }
+  }
+
  private:
   std::unordered_map<std::string, int64_t> functionCounts_;
   std::unordered_map<std::string, int64_t> expressionCounts_;
   std::unordered_map<velox::TypePtr, int64_t> constantCounts_;
+};
+
+class CollectExprStatsPlanNodeVisitor : public PlanNodeVisitor {
+ public:
+  struct Context : public PlanNodeVisitorContext {
+    ExprStats stats;
+  };
+
+  void visit(const ValuesNode& node, PlanNodeVisitorContext& context)
+      const override {
+    // Nothing to do.
+  }
+
+  void visit(const TableScanNode& node, PlanNodeVisitorContext& context)
+      const override {
+    // Nothing to do.
+  }
+
+  void visit(const FilterNode& node, PlanNodeVisitorContext& context)
+      const override {
+    auto& stats = static_cast<Context&>(context).stats;
+    collectExprStats(*node.predicate(), stats);
+    visitInputs(node, context);
+  }
+
+  void visit(const ProjectNode& node, PlanNodeVisitorContext& context)
+      const override {
+    auto& stats = static_cast<Context&>(context).stats;
+    collectExprStats(node.expressions(), stats);
+    visitInputs(node, context);
+  }
+
+  void visit(const AggregateNode& node, PlanNodeVisitorContext& context)
+      const override {
+    auto& stats = static_cast<Context&>(context).stats;
+    collectExprStats(node.groupingKeys(), stats);
+    for (const auto& agg : node.aggregates()) {
+      collectExprStats(*agg, stats);
+    }
+    visitInputs(node, context);
+  }
+
+  void visit(const JoinNode& node, PlanNodeVisitorContext& context)
+      const override {
+    auto& stats = static_cast<Context&>(context).stats;
+    if (node.condition() != nullptr) {
+      collectExprStats(*node.condition(), stats);
+    }
+    visitInputs(node, context);
+  }
+
+  void visit(const SortNode& node, PlanNodeVisitorContext& context)
+      const override {
+    auto& stats = static_cast<Context&>(context).stats;
+    for (const auto& sortKey : node.ordering()) {
+      collectExprStats(*sortKey.expression, stats);
+    }
+    visitInputs(node, context);
+  }
+
+  void visit(const LimitNode& node, PlanNodeVisitorContext& context)
+      const override {
+    visitInputs(node, context);
+  }
+
+  void visit(const SetNode& node, PlanNodeVisitorContext& context)
+      const override {
+    visitInputs(node, context);
+  }
+
+  void visit(const UnnestNode& node, PlanNodeVisitorContext& context)
+      const override {
+    auto& stats = static_cast<Context&>(context).stats;
+    collectExprStats(node.unnestExpressions(), stats);
+    visitInputs(node, context);
+  }
+
+ private:
+  static void collectExprStats(const Expr& expr, ExprStats& stats);
+
+  static void collectExprStats(
+      const std::vector<ExprPtr>& exprs,
+      ExprStats& stats);
 };
 
 class SummarizeExprVisitor : public ExprVisitor {
@@ -247,14 +344,9 @@ class SummarizeExprVisitor : public ExprVisitor {
   }
 
   void visit(const CallExpr& expr, ExprVisitorContext& ctx) const override {
-    const auto& name = expr.name();
-
     auto& myCtx = static_cast<Context&>(ctx);
     myCtx.expressionCounts()["call"]++;
-
-    auto& counts = myCtx.functionCounts();
-    counts[name]++;
-
+    myCtx.functionCounts()[expr.name()]++;
     visitInputs(expr, ctx);
   }
 
@@ -268,7 +360,10 @@ class SummarizeExprVisitor : public ExprVisitor {
 
   void visit(const AggregateExpr& expr, ExprVisitorContext& ctx)
       const override {
-    VELOX_NYI();
+    auto& myCtx = static_cast<Context&>(ctx);
+    myCtx.expressionCounts()["aggregate"]++;
+    myCtx.functionCounts()[expr.name()]++;
+    visitInputs(expr, ctx);
   }
 
   void visit(const WindowExpr& expr, ExprVisitorContext& ctx) const override {
@@ -291,9 +386,32 @@ class SummarizeExprVisitor : public ExprVisitor {
     auto& myCtx = static_cast<Context&>(ctx);
     myCtx.expressionCounts()["subquery"]++;
 
-    // TODO Collect expression stats from the subquery.
+    CollectExprStatsPlanNodeVisitor visitor;
+    CollectExprStatsPlanNodeVisitor::Context collectStatsContext;
+
+    expr.subquery()->accept(visitor, collectStatsContext);
+
+    myCtx.merge(collectStatsContext.stats);
   }
 };
+
+// static
+void CollectExprStatsPlanNodeVisitor::collectExprStats(
+    const Expr& expr,
+    ExprStats& stats) {
+  SummarizeExprVisitor visitor;
+  expr.accept(visitor, stats);
+}
+
+// static
+void CollectExprStatsPlanNodeVisitor::collectExprStats(
+    const std::vector<ExprPtr>& exprs,
+    ExprStats& stats) {
+  SummarizeExprVisitor visitor;
+  for (const auto& expr : exprs) {
+    expr->accept(visitor, stats);
+  }
+}
 
 class SummarizeToTextVisitor : public PlanNodeVisitor {
  public:

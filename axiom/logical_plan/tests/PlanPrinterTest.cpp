@@ -399,8 +399,8 @@ TEST_F(PlanPrinterTest, subquery) {
           testing::Eq("- PROJECT [5]: 3 fields: a INTEGER, expr INTEGER, sum BIGINT"),
           testing::Eq("      expressions: field: 3"),
           testing::Eq("  - PROJECT [4]: 3 fields: a INTEGER, expr INTEGER, sum_1 BIGINT"),
-          testing::Eq("        expressions: call: 1, constant: 1, field: 2, subquery: 1"),
-          testing::Eq("        functions: plus: 1"),
+          testing::Eq("        expressions: aggregate: 1, call: 2, constant: 1, field: 5, subquery: 1"),
+          testing::Eq("        functions: eq: 1, plus: 1, sum: 1"),
           testing::Eq("        constants: INTEGER: 1"),
           testing::Eq("        projections: 2 out of 3"),
           testing::Eq("    - VALUES [0]: 1 fields: a INTEGER"),
@@ -451,8 +451,8 @@ TEST_F(PlanPrinterTest, subquery) {
       testing::ElementsAre(
           testing::Eq("- FILTER [4]: 1 fields: a INTEGER"),
           testing::Eq("      predicate: gt(a, subquery(- Aggregate() -> ROW<max:INTEGER>  ..."),
-          testing::Eq("      expressions: call: 1, field: 1, subquery: 1"),
-          testing::Eq("      functions: gt: 1"),
+          testing::Eq("      expressions: aggregate: 1, call: 2, field: 4, subquery: 1"),
+          testing::Eq("      functions: eq: 1, gt: 1, max: 1"),
           testing::Eq("  - VALUES [0]: 1 fields: a INTEGER"),
           testing::Eq("        rows: 3"),
           testing::Eq(""))
