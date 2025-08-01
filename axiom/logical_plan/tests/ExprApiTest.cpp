@@ -35,12 +35,12 @@ class ExprApiTest : public testing::Test {
 
 TEST_F(ExprApiTest, arithmetic) {
   EXPECT_EQ(toString(Col("a") + 1), toString(Sql("a + 1")));
-  EXPECT_EQ(toString(Col("a") - Val(10)), toString(Sql("a - 10")));
+  EXPECT_EQ(toString(Col("a") - Lit(10)), toString(Sql("a - 10")));
   EXPECT_EQ(toString(Col("a") * Col("b")), toString(Sql("a * b")));
   EXPECT_EQ(toString(Col("a") / 1.2), toString(Sql("a / 1.2")));
 
-  EXPECT_EQ(toString(Call("mod", {Col("a"), Val(3)})), toString(Sql("a % 3")));
-  EXPECT_EQ(toString(Call("plus", Col("a"), Val(10))), toString(Sql("a + 10")));
+  EXPECT_EQ(toString(Call("mod", {Col("a"), Lit(3)})), toString(Sql("a % 3")));
+  EXPECT_EQ(toString(Call("plus", Col("a"), Lit(10))), toString(Sql("a + 10")));
 }
 
 TEST_F(ExprApiTest, call) {
@@ -84,7 +84,7 @@ TEST_F(ExprApiTest, alias) {
   EXPECT_EQ(Col("a").name(), "a");
   EXPECT_EQ(Col("a").as("b").name(), "b");
 
-  EXPECT_EQ(Val(1).name(), "");
+  EXPECT_EQ(Lit(1).name(), "");
 
   EXPECT_EQ((Col("a") + 1).as("b").name(), "b");
   EXPECT_EQ((Col("a") + 1).name(), "");

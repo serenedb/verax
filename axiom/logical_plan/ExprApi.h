@@ -21,7 +21,7 @@
 /// Convenient API for building expression trees "by hand".
 ///
 /// - Col(<name>) - column reference
-/// - Val(<value>) - literal value
+/// - Lit(<value>) - literal value
 /// - Call(<name>, arg1, arg2,...) - function call; supports zero or more
 /// argumnts
 /// - Cast(<type>, arg) - cast expression
@@ -200,17 +200,17 @@ class ExprApi {
   std::string name_;
 };
 
-ExprApi Val(Variant&& val);
+ExprApi Lit(Variant&& val);
 
-ExprApi Val(Variant&& val, TypePtr type);
+ExprApi Lit(Variant&& val, TypePtr type);
 
-ExprApi Val(const Variant& val);
+ExprApi Lit(const Variant& val);
 
-ExprApi Val(const Variant& val, TypePtr type);
+ExprApi Lit(const Variant& val, TypePtr type);
 
 template <typename T>
-inline ExprApi Val(T&& val) {
-  return Val(Variant(std::forward<T>(val)));
+inline ExprApi Lit(T&& val) {
+  return Lit(Variant(std::forward<T>(val)));
 }
 
 ExprApi Col(std::string name);
@@ -227,7 +227,7 @@ ExprApi Call(std::string name, T... args) {
 ExprApi Cast(TypePtr type, const ExprApi& input);
 
 inline ExprApi Cast(TypePtr type, const Variant& value) {
-  return Cast(std::move(type), Val(value));
+  return Cast(std::move(type), Lit(value));
 }
 
 ExprApi Lambda(std::vector<std::string> names, const ExprApi& body);

@@ -38,55 +38,55 @@ BinaryCall(std::string name, core::ExprPtr left, core::ExprPtr right) {
 } // namespace detail
 
 ExprApi ExprApi::operator+(const Variant& value) const {
-  return Plus(expr_, Val(value).expr());
+  return Plus(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator-(const Variant& value) const {
-  return Minus(expr_, Val(value).expr());
+  return Minus(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator*(const Variant& value) const {
-  return Multiply(expr_, Val(value).expr());
+  return Multiply(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator/(const Variant& value) const {
-  return Divide(expr_, Val(value).expr());
+  return Divide(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator%(const Variant& value) const {
-  return Modulus(expr_, Val(value).expr());
+  return Modulus(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator<(const Variant& value) const {
-  return Lt(expr_, Val(value).expr());
+  return Lt(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator<=(const Variant& value) const {
-  return Lte(expr_, Val(value).expr());
+  return Lte(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator>(const Variant& value) const {
-  return Gt(expr_, Val(value).expr());
+  return Gt(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator>=(const Variant& value) const {
-  return Gte(expr_, Val(value).expr());
+  return Gte(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator&&(const Variant& value) const {
-  return And(expr_, Val(value).expr());
+  return And(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator||(const Variant& value) const {
-  return Or(expr_, Val(value).expr());
+  return Or(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator==(const Variant& value) const {
-  return Eq(expr_, Val(value).expr());
+  return Eq(expr_, Lit(value).expr());
 }
 
 ExprApi ExprApi::operator!=(const Variant& value) const {
-  return NEq(expr_, Val(value).expr());
+  return NEq(expr_, Lit(value).expr());
 }
 
 ExprApi Col(std::string name) {
@@ -108,24 +108,24 @@ ExprApi Cast(velox::TypePtr type, const ExprApi& input) {
       type, input.expr(), /* isTryCat */ false, kNoAlias)};
 }
 
-ExprApi Val(Variant&& val) {
+ExprApi Lit(Variant&& val) {
   auto type = val.inferType();
   return ExprApi{std::make_shared<const core::ConstantExpr>(
       std::move(type), std::move(val), kNoAlias)};
 }
 
-ExprApi Val(Variant&& val, velox::TypePtr type) {
+ExprApi Lit(Variant&& val, velox::TypePtr type) {
   return ExprApi{std::make_shared<const core::ConstantExpr>(
       std::move(type), std::move(val), kNoAlias)};
 }
 
-ExprApi Val(const Variant& val) {
+ExprApi Lit(const Variant& val) {
   auto type = val.inferType();
   return ExprApi{std::make_shared<const core::ConstantExpr>(
       std::move(type), val, kNoAlias)};
 }
 
-ExprApi Val(const Variant& val, TypePtr type) {
+ExprApi Lit(const Variant& val, TypePtr type) {
   return ExprApi{std::make_shared<const core::ConstantExpr>(
       std::move(type), val, kNoAlias)};
 }
