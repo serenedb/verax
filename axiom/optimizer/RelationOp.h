@@ -413,7 +413,7 @@ struct Aggregation : public RelationOp {
             input ? input->distribution() : Distribution()),
         grouping(std::move(_grouping)) {}
 
-  // Grouping keys
+  // Grouping keys.
   ExprVector grouping;
 
   // Keys where the key expression is functionally dependent on
@@ -448,8 +448,13 @@ struct OrderBy : public RelationOp {
             RelType::kOrderBy,
             input,
             input ? input->distribution().copyWithOrder(keys, orderType)
-                  : Distribution(DistributionType(), 1, {}, keys, orderType)),
-        dependentKeys(dependentKeys) {}
+                  : Distribution(
+                        DistributionType(),
+                        1,
+                        {},
+                        std::move(keys),
+                        std::move(orderType))),
+        dependentKeys(std::move(dependentKeys)) {}
 
   // Keys where the key expression is functionally dependent on
   // another key or keys. These can be late materialized or converted

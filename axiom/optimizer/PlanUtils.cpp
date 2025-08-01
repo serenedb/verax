@@ -94,4 +94,13 @@ std::optional<int64_t> maybeIntegerLiteral(
   }
 }
 
+std::string conjunctsToString(const ExprVector& conjuncts) {
+  std::stringstream out;
+  for (auto i = 0; i < conjuncts.size(); ++i) {
+    out << conjuncts[i]->toString()
+        << (i == conjuncts.size() - 1 ? "" : " and ");
+  }
+  return out.str();
+}
+
 } // namespace facebook::velox::optimizer

@@ -17,6 +17,7 @@
 
 #include "axiom/logical_plan/LogicalPlanNode.h"
 #include "axiom/optimizer/Cost.h"
+#include "axiom/optimizer/DerivedTable.h"
 #include "axiom/optimizer/RelationOp.h"
 #include "velox/connectors/Connector.h"
 #include "velox/core/PlanNode.h"
@@ -401,8 +402,8 @@ struct PlanState {
       downstreamPrecomputed;
 
   // Ordered set of tables placed so far. Used for setting a
-  // breakpoint before a specific join order gets costted.
-  std::vector<int32_t> dbgPlacedTables;
+  // breakpoint before a specific join order gets costed.
+  std::vector<int32_t> debugPlacedTables;
 
   /// Updates 'cost_' to reflect 'op' being placed on top of the partial plan.
   void addCost(RelationOp& op);
@@ -451,7 +452,7 @@ struct PlanStateSaver {
         columns_(state.columns),
         cost_(state.cost),
         numBuilds_(state.builds.size()),
-        numPlaced_(state.dbgPlacedTables.size()) {}
+        numPlaced_(state.debugPlacedTables.size()) {}
 
   PlanStateSaver(PlanState& state, const JoinCandidate& candidate);
 
@@ -460,7 +461,7 @@ struct PlanStateSaver {
     state_.columns = std::move(columns_);
     state_.cost = cost_;
     state_.builds.resize(numBuilds_);
-    state_.dbgPlacedTables.resize(numPlaced_);
+    state_.debugPlacedTables.resize(numPlaced_);
   }
 
  private:
@@ -1509,9 +1510,6 @@ class Optimization {
 
   std::unique_ptr<BuiltinNames> builtinNames_;
 };
-
-/// True if single worker, i.e. do not plan remote exchanges
-bool isSingleWorker();
 
 /// Returns possible indices for driving table scan of 'table'.
 std::vector<ColumnGroupP> chooseLeafIndex(const BaseTable* table);

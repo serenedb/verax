@@ -1061,7 +1061,7 @@ PlanObjectP Optimization::addAggregation(
 bool hasNondeterministic(const core::TypedExprPtr& expr) {
   if (auto* call = dynamic_cast<const core::CallTypedExpr*>(expr.get())) {
     if (functionBits(toName(call->name()))
-            .contains(FunctionSet::kNondeterministic)) {
+            .contains(FunctionSet::kNonDeterministic)) {
       return true;
     }
   }

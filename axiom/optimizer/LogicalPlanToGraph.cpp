@@ -522,7 +522,7 @@ ExprCP Optimization::deduppedCall(
   }
   auto* call =
       make<Call>(name, std::move(value), std::move(args), std::move(flags));
-  if (!call->containsFunction(FunctionSet::kNondeterministic)) {
+  if (!call->containsNonDeterministic()) {
     key.args = &call->args();
     functionDedup_[key] = call;
   }
@@ -1096,7 +1096,7 @@ namespace {
 bool hasNondeterministic(const lp::ExprPtr& expr) {
   if (const auto* call = expr->asUnchecked<lp::CallExpr>()) {
     if (functionBits(toName(call->name()))
-            .contains(FunctionSet::kNondeterministic)) {
+            .contains(FunctionSet::kNonDeterministic)) {
       return true;
     }
   }

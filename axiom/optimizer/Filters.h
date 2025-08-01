@@ -14,24 +14,11 @@
  * limitations under the License.
  */
 
-#include "axiom/optimizer/Plan.h"
-#include "axiom/optimizer/PlanUtils.h"
 #include "axiom/optimizer/QueryGraph.h"
-#include "velox/common/base/SimdUtil.h"
-#include "velox/common/base/SuccinctPrinter.h"
 
 namespace facebook::velox::optimizer {
 
 // Returns the cost and cardinality ('unitCost' and 'fanout') for 'conjuncts'.
 Cost filterCost(CPSpan<Expr> conjuncts);
-
-/// Returns 'conjuncts' with all items that are common between all disjuncts of
-/// each OR are pulled to top level.
-ExprVector extractCommonConjuncts(ExprVector conjuncts) {}
-
-// Extracts an OR that can be resolved for 'table'.  This has a result
-// if each disjunct of 'or' is an and that specifies some condition
-// that can be resolved within 'table'.
-disjunctsForTable(ExprPtr or, PlanObjectCP table);
 
 } // namespace facebook::velox::optimizer

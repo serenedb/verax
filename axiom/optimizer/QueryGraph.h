@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "axiom/logical_plan/LogicalPlanNode.h"
+#include "axiom/logical_plan/Expr.h"
 #include "axiom/optimizer/Schema.h"
 #include "velox/core/PlanNode.h"
 
@@ -44,13 +44,14 @@ namespace facebook::velox::optimizer {
 /// of functions are found inside the children of an Expr.
 class FunctionSet {
  public:
-  /// Indicates and aggregate function in the set.
+  /// Indicates an aggregate function in the set.
   static constexpr uint64_t kAggregate = 1;
 
-  /// Indicates a non-determinstic function
-  static constexpr uint64_t kNondeterministic = 1UL << 1;
+  /// Indicates a non-determinstic function in the set.
+  static constexpr uint64_t kNonDeterministic = 1UL << 1;
 
   FunctionSet() : set_(0) {}
+
   explicit FunctionSet(uint64_t set) : set_(set) {}
 
   /// True if 'item' is in 'this'.
@@ -104,6 +105,10 @@ class Expr : public PlanObject {
     return value_;
   }
 
+  bool containsNonDeterministic() const {
+    return containsFunction(FunctionSet::kNonDeterministic);
+  }
+
   /// True if 'this' contains any function from 'set'. See FunctionSet.
   virtual bool containsFunction(uint64_t /*set*/) const {
     return false;
@@ -121,9 +126,6 @@ class Expr : public PlanObject {
   // Type Constraints on the value of 'this'.
   Value value_;
 };
-
-/// If 'object' is an Expr, returns Expr::singleTable, else nullptr.
-PlanObjectCP singleTable(PlanObjectCP object);
 
 struct Equivalence;
 using EquivalenceP = Equivalence*;
@@ -264,11 +266,6 @@ class Field : public Expr {
   int32_t index_;
   ExprCP base_;
 };
-
-template <typename T, typename U>
-inline CPSpan<T> toRangeCast(U v) {
-  return CPSpan<T>(reinterpret_cast<const T* const*>(v.data()), v.size());
-}
 
 struct SubfieldSet {
   /// Id of an accessed column of complex type.
@@ -482,7 +479,9 @@ class Call : public Expr {
 using CallCP = const Call*;
 
 /// True if 'expr' is a call to function 'name'.
-bool isCallExpr(ExprCP expr, Name name);
+inline bool isCallExpr(ExprCP expr, Name name) {
+  return expr->type() == PlanType::kCall && expr->as<Call>()->name() == name;
+}
 
 /// Represents a lambda. May occur as an immediate argument of selected
 /// functions.
@@ -548,7 +547,7 @@ struct JoinSide {
 
 /// Represents a possibly directional equality join edge.
 /// 'rightTable' is always set. 'leftTable' is nullptr if 'leftKeys' come from
-/// different tables. If so, 'this' must be non-inner and not full outer.
+/// different tables. If so, 'this' must be not inner and not full outer.
 /// 'filter' is a list of post join conjuncts. This should be present only in
 /// non-inner joins. For inner joins these are representable as freely
 /// decomposable and reorderable conjuncts.
@@ -573,6 +572,7 @@ class JoinEdge {
         rightNotExists_(rightNotExists),
         markColumn_(markColumn),
         directed_(directed) {
+    VELOX_CHECK_NOT_NULL(rightTable);
     if (isInner()) {
       VELOX_CHECK(filter_.empty());
     }
@@ -639,9 +639,9 @@ class JoinEdge {
   // other side.
   const JoinSide sideOf(PlanObjectCP side, bool other = false) const;
 
-  /// Returns the table on the otherside of 'table' and the number of rows in
+  /// Returns the table on the other side of 'table' and the number of rows in
   /// the returned table for one row in 'table'. If the join is not inner
-  /// returns nullptr, 0.
+  /// returns {nullptr, 0}.
   std::pair<PlanObjectCP, float> otherTable(PlanObjectCP table) const {
     return leftTable_ == table && !leftOptional_
         ? std::pair<PlanObjectCP, float>{rightTable_, lrFanout_}
@@ -650,14 +650,26 @@ class JoinEdge {
         : std::pair<PlanObjectCP, float>{nullptr, 0};
   }
 
+  PlanObjectCP otherSide(PlanObjectCP side) const {
+    if (side == leftTable()) {
+      return rightTable();
+    }
+
+    if (rightTable() == side) {
+      return leftTable();
+    }
+
+    return nullptr;
+  }
+
   const ExprVector& filter() const {
     return filter_;
   }
 
-  void setFanouts(float rl, float lr) {
+  void setFanouts(float rightToLeft, float leftToRight) {
     fanoutsFixed_ = true;
-    lrFanout_ = lr;
-    rlFanout_ = rl;
+    lrFanout_ = rightToLeft;
+    rlFanout_ = leftToRight;
   }
 
   std::string toString() const;
@@ -665,7 +677,7 @@ class JoinEdge {
   //// Fills in 'lrFanout' and 'rlFanout', 'leftUnique', 'rightUnique'.
   void guessFanout();
 
-  // True if a hash join build can be broadcastable. Used when building on the
+  // True if a hash join build can be broadcasted. Used when building on the
   // right. None of the right hash join variants is broadcastable.
   bool isBroadcastableType() const;
 
@@ -677,10 +689,12 @@ class JoinEdge {
  private:
   // Leading left side join keys.
   ExprVector leftKeys_;
-  // Leading right side join keys, compared equals to 1:1 to 'leftKeys'.
+
+  // Leading right side join keys, compared equals 1:1 to 'leftKeys'.
   ExprVector rightKeys_;
 
   PlanObjectCP const leftTable_;
+
   PlanObjectCP const rightTable_;
 
   // 'rightKeys' select max 1 'leftTable' row.
@@ -689,7 +703,7 @@ class JoinEdge {
   // 'leftKeys' select max 1 'rightTable' row.
   bool rightUnique_{false};
 
-  // number of right side rows selected for one row on the left.
+  // Number of right side rows selected for one row on the left.
   float lrFanout_{1};
 
   // Number of left side rows selected for one row on the right.
@@ -730,17 +744,9 @@ using JoinEdgeP = JoinEdge*;
 
 using JoinEdgeVector = std::vector<JoinEdgeP, QGAllocator<JoinEdgeP>>;
 
-/// Adds 'element' to 'vector' if it is not in it.
-template <typename V, typename E>
-inline void pushBackUnique(V& vector, E& element) {
-  if (std::find(vector.begin(), vector.end(), element) == vector.end()) {
-    vector.push_back(element);
-  }
-}
-
-/// Represents a reference to a table from a query. The There is one of these
+/// Represents a reference to a table from a query. There is one of these
 /// for each occurrence of the schema table. A TableScan references one
-/// baseTable but the same BaseTable can be referenced from many TableScans, for
+/// BaseTable but the same BaseTable can be referenced from many TableScans, for
 /// example if accessing different indices in a secondary to primary key lookup.
 struct BaseTable : public PlanObject {
   BaseTable() : PlanObject(PlanType::kTable) {}
@@ -775,9 +781,7 @@ struct BaseTable : public PlanObject {
     return true;
   }
 
-  void addJoinedBy(JoinEdgeP join) {
-    pushBackUnique(joinedBy, join);
-  }
+  void addJoinedBy(JoinEdgeP join);
 
   /// Adds 'expr' to 'filters' or 'columnFilters'.
   void addFilter(ExprCP expr);
@@ -869,189 +873,6 @@ struct AggregationPlan : public PlanObject {
 
 using AggregationPlanCP = const AggregationPlan*;
 
-struct OrderBy;
-using OrderByP = OrderBy*;
-
-/// Represents a derived table, i.e. a select in a from clause. This is the
-/// basic unit of planning. Derived tables can be merged and split apart from
-/// other ones. Join types and orders are decided within each derived table. A
-/// derived table is likewise a reorderable unit inside its parent derived
-/// table. Joins can move between derived tables within limits, considering the
-/// semantics of e.g. group by.
-struct DerivedTable : public PlanObject {
-  DerivedTable() : PlanObject(PlanType::kDerivedTable) {}
-
-  // Distribution that gives partition, cardinality and
-  // order/uniqueness for the dt alone. This is expressed in terms of
-  // outside visible 'columns'. Actual uses of the dt in candidate
-  // plans may be modified from this by e.g. importing restrictions
-  // from enclosing query. Set for a non-top level dt.
-  Distribution* distribution{nullptr};
-
-  // Correlation name.
-  Name cname{nullptr};
-
-  // Columns projected out. Visible in the enclosing query.
-  ColumnVector columns;
-
-  // Exprs projected out.1:1 to 'columns'.
-  ExprVector exprs;
-
-  // References all joins where 'this' is an end point.
-  JoinEdgeVector joinedBy;
-
-  // All tables in from, either Table or DerivedTable. If Table, all
-  // filters resolvable with the table alone are in single column filters or
-  // 'filter' of BaseTable.
-  std::vector<PlanObjectCP, QGAllocator<PlanObjectCP>> tables;
-
-  // Repeats the contents of 'tables'. Used for membership check. A DerivedTable
-  // can be a subset of another, for example when planning a join for a build
-  // side. In this case joins that refer to tables not in 'tableSet' are not
-  // considered.
-  PlanObjectSet tableSet;
-
-  // Set if this is a set operation. If set, 'children' has the operands.
-  std::optional<logical_plan::SetOperation> setOp;
-
-  /// Operands if 'this' is a set operation, e.g. union.
-  std::vector<DerivedTable*, QGAllocator<DerivedTable*>> children;
-
-  // Single row tables from non-correlated scalar subqueries.
-  PlanObjectSet singleRowDts;
-
-  // Tables that are not to the right sides of non-commutative joins.
-  PlanObjectSet startTables;
-
-  // Joins between 'tables'.
-  JoinEdgeVector joins;
-
-  // Filters in where for that are not single table expressions and not join
-  // filters of explicit joins and not equalities between columns of joined
-  // tables.
-  ExprVector conjuncts;
-
-  // Number of fully processed leading elements of 'conjuncts'.
-  int32_t numCanonicalConjuncts{0};
-
-  // Set of reducing joined tables imported to reduce build size. Set if 'this'
-  // represents a build side join.
-  PlanObjectSet importedExistences;
-
-  // The set of tables in import() '_tables' that are fully covered by this dt
-  // and need not be considered outside of it. If 'firstTable' in import is a
-  // group by dt, for example, some joins may be imported as reducing existences
-  // but will still have to be considered by the enclosing query. Such tables
-  // are not included in 'fullyImported' If 'firstTable' in import is a base
-  // table, then 'fullyImported' is '_tables'.
-  PlanObjectSet fullyImported;
-
-  //
-  // True if this dt is already a reducing join imported to a build side. Do not
-  // try to further restrict this with probe side.
-  bool noImportOfExists{false};
-  // Postprocessing clauses, group by, having, order by, limit, offset.
-  AggregationPlanCP aggregation{nullptr};
-  ExprVector having;
-  OrderByP orderBy{nullptr};
-  int32_t limit{-1};
-  int32_t offset{0};
-
-  /// Adds an equijoin edge between 'left' and 'right'. The flags correspond to
-  /// the like-named members in Join.
-  void addJoinEquality(
-      ExprCP left,
-      ExprCP right,
-      const ExprVector& filter,
-      bool leftOptional,
-      bool rightOptional,
-      bool rightExists,
-      bool rightNotExists);
-
-  // after 'joins' is filled in, links tables to their direct and
-  // equivalence-implied joins.
-  void linkTablesToJoins();
-
-  /// Completes 'joins' with edges implied by column equivalences.
-  void addImpliedJoins();
-
-  /// Extracts implied conjuncts and removes duplicates from
-  /// 'conjuncts' and updates 'conjuncts'. Extracted conjuncts may
-  /// allow extra pushdown or allow create join edges. May be called
-  /// repeatedly, each e.g. after pushing down conjuncts from outer
-  /// DTs.
-  void expandConjuncts();
-
-  /// Initializes 'this' to join 'tables' from 'super'. Adds the joins from
-  /// 'existences' as semijoins to limit cardinality when making a hash join
-  /// build side. Allows importing a reducing join from probe to build.
-  /// 'firstTable' is the joined table that is restricted by the other tables in
-  /// 'tables' and 'existences'. 'existsFanout' us the reduction from joining
-  /// 'firstTable' with 'existences'.
-  void import(
-      const DerivedTable& super,
-      PlanObjectCP firstTable,
-      const PlanObjectSet& tables,
-      const std::vector<PlanObjectSet>& existences,
-      float existsFanout = 1);
-
-  bool isTable() const override {
-    return true;
-  }
-
-  //// True if 'table' is of 'this'.
-  bool hasTable(PlanObjectCP table) const {
-    return std::find(tables.begin(), tables.end(), table) != tables.end();
-  }
-
-  // True if 'join' exists in 'this'. Tables link to joins that may be
-  // in different speculative candidate dts. So only consider joins
-  // inside the current dt wen planning.
-  bool hasJoin(JoinEdgeP join) const {
-    return std::find(joins.begin(), joins.end(), join) != joins.end();
-  }
-
-  /// Fills in 'startTables_' to 'tables_' that are not to the right of
-  /// non-commutative joins.
-  void setStartTables();
-
-  std::string toString() const override;
-  void addJoinedBy(JoinEdgeP join) {
-    pushBackUnique(joinedBy, join);
-  }
-
-  /// Moves suitable elements of 'conjuncts' into join edges or single
-  /// table filters. May be called repeatedly if enclosing dt's add
-  /// more conjuncts. May call itself recursively on component dts.
-  void distributeConjuncts();
-
-  /// memoizes plans for 'this' and fills in 'distribution_'. Needed
-  /// before adding 'this' as a join side because join sides must have
-  /// a cardinality guess.
-  void makeInitialPlan();
-
- private:
-  // Imports the joins in 'this' inside 'firstDt', which must be a
-  // member of 'this'. The import is possible if the join is not
-  // through aggregates in 'firstDt'. On return, all joins that can go
-  // inside firstDt are imported below aggregation in
-  // firstDt. 'firstDt' is not modified, its original contents are
-  // copied in a new dt before the import.
-  void importJoinsIntoFirstDt(const DerivedTable* firstDt);
-
-  // Sets 'dt' to be the complete contents of 'this'.
-  void flattenDt(const DerivedTable* dt);
-
-  // Finds single row dts from non-correlated scalar subqueries.
-  void findSingleRowDts();
-
-  // Sets 'columns' and 'exprs'.
-  void makeProjection(const ExprVector& exprs);
-};
-
-using DerivedTableP = DerivedTable*;
-using DerivedTableCP = const DerivedTable*;
-
 float tableCardinality(PlanObjectCP table);
 
 /// Returns all distinct tables 'exprs' depend on.
@@ -1073,5 +894,8 @@ void extractNonInnerJoinEqualities(
 
 /// Appends the string representation of 'exprs' to 'out'.
 void exprsToString(const ExprVector& exprs, std::stringstream& out);
+
+ExprCP
+importExpr(ExprCP expr, const ColumnVector& outer, const ExprVector& inner);
 
 } // namespace facebook::velox::optimizer

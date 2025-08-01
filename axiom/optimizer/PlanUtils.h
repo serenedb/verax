@@ -17,6 +17,7 @@
 #pragma once
 
 #include <folly/Range.h>
+#include "axiom/logical_plan/Expr.h"
 #include "axiom/optimizer/QueryGraph.h"
 
 namespace facebook::velox::optimizer {
@@ -66,35 +67,6 @@ void appendToVector(T& destination, U& source) {
   }
 }
 
-constexpr uint32_t kNotFound = ~0U;
-
-/// Returns index of 'expr' in collection 'exprs'. kNotFound if not found.
-/// Compares with equivalence classes, so that equal columns are
-/// interchangeable.
-template <typename V>
-uint32_t position(const V& exprs, const Expr& expr) {
-  for (auto i = 0; i < exprs.size(); ++i) {
-    if (exprs[i]->sameOrEqual(expr)) {
-      return i;
-    }
-  }
-  return kNotFound;
-}
-
-/// Returns index of 'expr' in collection 'exprs'. kNotFound if not found.
-/// Compares with equivalence classes, so that equal columns are
-/// interchangeable. Applies 'getter' to each element of 'exprs' before
-/// comparison.
-template <typename V, typename Getter>
-uint32_t position(const V& exprs, Getter getter, const Expr& expr) {
-  for (auto i = 0; i < exprs.size(); ++i) {
-    if (getter(exprs[i])->sameOrEqual(expr)) {
-      return i;
-    }
-  }
-  return kNotFound;
-}
-
 /// Prints a number with precision' digits followed by a scale letter (n, u, m,
 /// k, M, G T, P).
 std::string succinctNumber(double value, int32_t precision = 2);
@@ -118,6 +90,14 @@ Target transform(const V& set, Func func) {
   return result;
 }
 
+/// Adds 'element' to 'vector' if it is not in it.
+template <typename V, typename E>
+inline void pushBackUnique(V& vector, E& element) {
+  if (std::find(vector.begin(), vector.end(), element) == vector.end()) {
+    vector.push_back(element);
+  }
+}
+
 /// Returns the integer value of 'variant'. Throws if this is not an integer.
 int64_t integerValue(const Variant* variant);
 
@@ -125,5 +105,7 @@ int64_t integerValue(const Variant* variant);
 /// std::nullopt otherwise.
 std::optional<int64_t> maybeIntegerLiteral(
     const logical_plan::ConstantExpr* expr);
+
+std::string conjunctsToString(const ExprVector& conjuncts);
 
 } // namespace facebook::velox::optimizer
