@@ -189,6 +189,13 @@ class CallExpr : public Expr {
       const std::string& name,
       const std::vector<ExprPtr>& inputs);
 
+  template <typename... T>
+  CallExpr(const TypePtr& type, const std::string& name, T... inputs)
+      : CallExpr(
+            type,
+            name,
+            std::vector<ExprPtr>{std::forward<ExprPtr>(inputs)...}) {}
+
   const std::string& name() const {
     return name_;
   }
@@ -356,6 +363,13 @@ class SpecialFormExpr : public Expr {
       const TypePtr& type,
       SpecialForm form,
       const std::vector<ExprPtr>& inputs);
+
+  template <typename... T>
+  SpecialFormExpr(const TypePtr& type, SpecialForm form, T... inputs)
+      : SpecialFormExpr(
+            type,
+            form,
+            std::vector<ExprPtr>{std::forward<ExprPtr>(inputs)...}) {}
 
   SpecialForm form() const {
     return form_;

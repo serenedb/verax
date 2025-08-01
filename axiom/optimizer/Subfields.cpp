@@ -126,14 +126,16 @@ void Optimization::markFieldAccessed(
   }
   // The source is a lambda arg. We apply the path to the corresponding
   // container arg of the 2nd order function call that has the lambda.
-  auto* md =
-      FunctionRegistry::instance()->metadata(toName(source.call->name()));
-  auto* lInfo = md->lambdaInfo(source.lambdaOrdinal);
-  auto nth = lInfo->argOrdinal[ordinal];
   auto callContext = context;
   callContext.erase(callContext.begin());
   auto callSources = sources;
   callSources.erase(callSources.begin());
+
+  auto* md =
+      FunctionRegistry::instance()->metadata(toName(source.call->name()));
+  const auto* lambdaInfo = md->lambdaInfo(source.lambdaOrdinal);
+  const auto nth = lambdaInfo->argOrdinal[ordinal];
+
   markSubfields(
       source.call->inputs()[nth].get(),
       steps,
@@ -270,7 +272,7 @@ void Optimization::markSubfields(
           continue;
         }
       }
-      if (auto* lambda = metadata->lambdaInfo(i)) {
+      if (metadata->lambdaInfo(i)) {
         auto argType = lambdaArgType(call->inputs()[i].get());
         std::vector<const RowType*> newContext = {argType.get()};
         newContext.insert(newContext.end(), context.begin(), context.end());

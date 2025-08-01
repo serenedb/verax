@@ -284,13 +284,51 @@ struct SubfieldSet {
 /// Describes where the args given to a lambda come from.
 enum class LambdaArg : int8_t { kKey, kValue, kElement };
 
+// Lambda function process arrays or maps using lambda expressions.
+// Example:
+//
+//    filter(array, x -> x > 0)
+//
+//    LambdaInfo{.ordinal = 1, .lambdaArg = {kElement}, .argOrdinal = {0}}
+//
+// , where .ordinal = 1 says that lambda expression is the second argument of
+// the function; .lambdaArg = {kElement} together with .argOrdinal = {0} say
+// that the lambda expression takes one argument, which is the element of the
+// array, which is to be found in the first argument of the function.
+//
+// clang-format off
+//    transform_values(map, (k, v) -> v + 1)
+//
+//    LambdaInfo{.ordinal = 1, .lambdaArg = {kKey, kValue}, .argOrdinal = {0, 0}}
+// clang-format on
+//
+// , where ordinal = 1 says that lambda expression is the second argument of the
+// function; .lambdaArg = {kKey, kValue} together with .argOrdinal = {0, 0} say
+// that lambda expression takes two arguments, which are the key and the value
+// of the same map, which is to be found in the first argument of the function.
+//
+// clang-format off
+//    zip(a, b, (x, y) -> x + y)
+//
+//    LambdaInfo{.ordinal = 2, .lambdaArg = {kElement, kElement}, .argOrdinal = {0, 1}}
+// clang-format on
+//
+// , where ordinal = 2 says that lambda expression is the third argument of the
+// function; .lambdaArg = {kElement, kElement} together with .argOrdinal = {0,
+// 1} say that lambda expression takes two arguments: first is an element of the
+// array in the first argument of the function; second is an element of the
+// array in the second argument of the function.
+//
 struct LambdaInfo {
-  /// The ordinal of the lambda in the function's args
+  /// The ordinal of the lambda in the function's args.
   int32_t ordinal;
+
   /// Getter applied to the collection given in corresponding 'argOrdinal' to
   /// get each argument of the lambda.
   std::vector<LambdaArg> lambdaArg;
-  /// Argument giving the collection
+
+  /// The ordinal of the array or map that provides the lambda argument in the
+  /// function's args. 1:1 with lambdaArg.
   std::vector<int32_t> argOrdinal;
 };
 
@@ -306,10 +344,10 @@ struct FunctionMetadata {
         isArrayConstructor || isMapConstructor;
   }
 
-  LambdaInfo* lambdaInfo(int32_t i) {
-    for (auto j = 0; j < lambdas.size(); ++j) {
-      if (lambdas[j].ordinal == i) {
-        return &lambdas[j];
+  const LambdaInfo* lambdaInfo(int32_t index) const {
+    for (const auto& lambda : lambdas) {
+      if (lambda.ordinal == index) {
+        return &lambda;
       }
     }
     return nullptr;
@@ -319,8 +357,8 @@ struct FunctionMetadata {
 
   /// If accessing a subfield on the result means that the same subfield is
   /// required in an argument, this is the ordinal of the argument. This is 1
-  /// for transform_values, which means that transform_values(f, map)[1] implies
-  /// that key 1 is accessed in 'map'.
+  /// for transform_values, which means that transform_values(map, <lambda>)[1]
+  /// implies that key 1 is accessed in 'map'.
   std::optional<int32_t> subfieldArg;
 
   /// If true, then access of subscript 'i' in result means that argument 'i' is

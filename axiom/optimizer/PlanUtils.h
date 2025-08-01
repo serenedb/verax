@@ -96,7 +96,7 @@ uint32_t position(const V& exprs, Getter getter, const Expr& expr) {
 }
 
 /// Prints a number with precision' digits followed by a scale letter (n, u, m,
-/// , k, M, G T, P.
+/// k, M, G T, P).
 std::string succinctNumber(double value, int32_t precision = 2);
 
 /// Returns the sum of the sizes of 'exprs'.
@@ -119,7 +119,7 @@ Target transform(const V& set, Func func) {
 }
 
 /// Returns the integer value of 'variant'. Throws if this is not an integer.
-int64_t integerValue(const variant* variant);
+int64_t integerValue(const Variant* variant);
 
 /// Returns the integer value of 'expr' if the type is an integer,
 /// std::nullopt otherwise.

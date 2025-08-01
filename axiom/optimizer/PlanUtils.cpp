@@ -66,7 +66,7 @@ int64_t integerValueInner(const variant* variant) {
 }
 } // namespace
 
-int64_t integerValue(const variant* variant) {
+int64_t integerValue(const Variant* variant) {
   switch (variant->kind()) {
     case TypeKind::TINYINT:
       return integerValueInner<int8_t>(variant);

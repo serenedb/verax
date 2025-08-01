@@ -37,17 +37,19 @@ FunctionRegistry* FunctionRegistry::instance() {
   static auto registry = std::make_unique<FunctionRegistry>();
   return registry.get();
 }
+
 const FunctionMetadata* functionMetadata(Name name) {
   return FunctionRegistry::instance()->metadata(name);
 }
 
 bool declareBuiltIn() {
   {
+    LambdaInfo info{
+        .ordinal = 1,
+        .lambdaArg = {LambdaArg::kKey, LambdaArg::kValue},
+        .argOrdinal = {0, 0}};
+
     auto metadata = std::make_unique<FunctionMetadata>();
-    LambdaInfo info;
-    info.ordinal = 1;
-    info.lambdaArg = {LambdaArg::kKey, LambdaArg::kValue};
-    info.argOrdinal = {0, 0};
     metadata->lambdas.push_back(std::move(info));
     metadata->subfieldArg = 0;
     metadata->cost = 40;
@@ -55,16 +57,26 @@ bool declareBuiltIn() {
         "transform_values", std::move(metadata));
   }
   {
+    LambdaInfo info{
+        .ordinal = 1, .lambdaArg = {LambdaArg::kElement}, .argOrdinal = {0}};
+
     auto metadata = std::make_unique<FunctionMetadata>();
-    LambdaInfo info;
-    info.ordinal = 1;
-    info.lambdaArg = {LambdaArg::kElement};
-    info.argOrdinal = {0};
     metadata->lambdas.push_back(std::move(info));
     metadata->subfieldArg = 0;
     metadata->cost = 20;
     FunctionRegistry::instance()->registerFunction(
         "transform", std::move(metadata));
+  }
+  {
+    LambdaInfo info{
+        .ordinal = 2,
+        .lambdaArg = {LambdaArg::kElement, LambdaArg::kElement},
+        .argOrdinal = {0, 1}};
+
+    auto metadata = std::make_unique<FunctionMetadata>();
+    metadata->lambdas.push_back(std::move(info));
+    metadata->cost = 20;
+    FunctionRegistry::instance()->registerFunction("zip", std::move(metadata));
   }
   return true;
 }
