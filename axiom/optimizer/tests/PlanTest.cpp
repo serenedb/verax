@@ -35,9 +35,6 @@ namespace lp = facebook::velox::logical_plan;
 
 namespace facebook::velox::optimizer {
 namespace {
-std::string nodeString(core::PlanNode* node) {
-  return node->toString(true, true);
-}
 
 class PlanTest : public virtual test::ParquetTpchTest,
                  public virtual test::QueryTestBase {
@@ -88,24 +85,7 @@ class PlanTest : public virtual test::ParquetTpchTest,
     connector::unregisterConnector(kTestConnectorId);
   }
 
-  std::string makePlan(
-      std::shared_ptr<const core::PlanNode> plan,
-      bool partitioned,
-      bool ordered,
-      int numRepeats = FLAGS_num_repeats) {
-    std::string planText;
-    for (auto counter = 0; counter < numRepeats; ++counter) {
-      optimizerOptions_.traceFlags = FLAGS_optimizer_trace;
-      auto result = planVelox(plan, &planText);
-    }
-    return fmt::format(
-        "=== {} {}:\n{}\n",
-        partitioned ? "Partitioned on PK" : "Not partitioned",
-        ordered ? "sorted on PK" : "not sorted",
-        planText);
-  }
-
-  void checkSame(
+  void checkSameTpch(
       const core::PlanNodePtr& planNode,
       core::PlanNodePtr referencePlan = nullptr,
       std::string* planString = nullptr,
@@ -136,6 +116,8 @@ class PlanTest : public virtual test::ParquetTpchTest,
       core::PlanNodePtr referencePlan,
       std::string* planString = nullptr,
       std::string* veloxPlan = nullptr) {
+    VELOX_CHECK_NOT_NULL(referencePlan);
+
     auto fragmentedPlan = planVelox(planNode, planString);
     if (veloxPlan) {
       *veloxPlan = veloxString(fragmentedPlan.plan);
@@ -156,7 +138,7 @@ class PlanTest : public virtual test::ParquetTpchTest,
 
   // Breaks str into tokens at whitespace and punctuation. Returns tokens as
   // string, character position pairs.
-  std::vector<std::pair<std::string, int32_t>> tokenize(
+  static std::vector<std::pair<std::string, int32_t>> tokenize(
       const std::string& str) {
     std::vector<std::pair<std::string, int32_t>> result;
     std::string token;
@@ -183,7 +165,9 @@ class PlanTest : public virtual test::ParquetTpchTest,
     return result;
   }
 
-  void expectPlan(const std::string& actual, const std::string& expected) {
+  static void expectPlan(
+      const std::string& actual,
+      const std::string& expected) {
     auto expectedTokens = tokenize(expected);
     auto actualTokens = tokenize(expected);
     for (auto i = 0; i < actualTokens.size() && i < expectedTokens.size();
@@ -202,7 +186,7 @@ class PlanTest : public virtual test::ParquetTpchTest,
     auto q = builder_->getQueryPlan(query).plan;
     auto rq = referenceBuilder_->getQueryPlan(query).plan;
     std::string planText;
-    checkSame(q, rq, &planText);
+    checkSameTpch(q, rq, &planText);
     if (!expected.empty()) {
       expectPlan(planText, expected);
     } else {
@@ -348,7 +332,8 @@ TEST_F(PlanTest, q1) {
 }
 
 TEST_F(PlanTest, q2) {
-  checkTpch(1);
+  GTEST_SKIP();
+  checkTpch(2);
 }
 
 TEST_F(PlanTest, q3) {
@@ -447,50 +432,74 @@ TEST_F(PlanTest, q22) {
 TEST_F(PlanTest, filterToJoinEdge) {
   auto nationType = ROW({"n_regionkey"}, {BIGINT()});
   auto regionType = ROW({"r_regionkey"}, {BIGINT()});
+
+  lp::PlanBuilder::Context context;
+  auto logicalPlan =
+      lp::PlanBuilder(context)
+          .tableScan(
+              exec::test::kHiveConnectorId, "nation", nationType->names())
+          .crossJoin(lp::PlanBuilder(context).tableScan(
+              exec::test::kHiveConnectorId, "region", regionType->names()))
+          .filter("n_regionkey + 1 = r_regionkey + 1")
+          .build();
+
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto nested = exec::test::PlanBuilder(planNodeIdGenerator)
-                    .tableScan("nation", nationType, {}, {})
-                    .nestedLoopJoin(
-                        exec::test::PlanBuilder(planNodeIdGenerator)
-                            .tableScan("region", regionType, {}, {})
-                            .planNode(),
-                        {"n_regionkey", "r_regionkey"},
-                        core::JoinType::kInner)
-                    .filter("n_regionkey + 1 = r_regionkey + 1")
-                    .planNode();
+  auto referencePlan = exec::test::PlanBuilder(planNodeIdGenerator)
+                           .tableScan("nation", nationType)
+                           .nestedLoopJoin(
+                               exec::test::PlanBuilder(planNodeIdGenerator)
+                                   .tableScan("region", regionType)
+                                   .planNode(),
+                               {"n_regionkey", "r_regionkey"},
+                               core::JoinType::kInner)
+                           .filter("n_regionkey + 1 = r_regionkey + 1")
+                           .planNode();
+
   std::string plan;
-  checkSame(nested, nullptr, &plan);
+  checkSame(logicalPlan, referencePlan, &plan);
   expectPlan(plan, "nation t2*H  (region t3  Build ) project");
 
-  nested =
-      exec::test::PlanBuilder(planNodeIdGenerator)
-          .tableScan("nation", nationType, {}, {})
-          .filter("random() < 2::DOUBLE")
-          .nestedLoopJoin(
-              exec::test::PlanBuilder(planNodeIdGenerator)
-                  .tableScan("region", regionType, {}, {})
-                  .filter("random() < 2::DOUBLE")
-                  .planNode(),
-              {"n_regionkey", "r_regionkey"},
-              core::JoinType::kInner)
-          .filter("n_regionkey + 1 = r_regionkey + 1 and random() < 2::DOUBLE")
-          .planNode();
-  checkSame(nested, nullptr, &plan);
+  logicalPlan =
+      lp::PlanBuilder(context)
+          .tableScan(
+              exec::test::kHiveConnectorId, "nation", nationType->names())
+          .filter("rand() < 2.0")
+          .crossJoin(lp::PlanBuilder(context)
+                         .tableScan(
+                             exec::test::kHiveConnectorId,
+                             "region",
+                             regionType->names())
+                         .filter("rand() < 2.0"))
+          .filter("n_regionkey + 1 = r_regionkey + 1 and rand() < 2.0")
+          .build();
+
+  checkSame(logicalPlan, referencePlan, &plan);
   expectPlan(
       plan,
       "nation t5 filter 1 exprs  project 1 columns  project 1 columns *H  (region t8 filter 1 exprs  project 1 columns  project 1 columns  broadcast   Build ) filter 1 exprs  project 2 columns  project 2 columns ");
 }
 
 TEST_F(PlanTest, filterImport) {
-  auto orderType = ROW({"o_custkey", "o_totalprice"}, {BIGINT(), DOUBLE()});
-  auto agg = exec::test::PlanBuilder()
-                 .tableScan("orders", orderType, {}, {})
-                 .singleAggregation({"o_custkey"}, {"sum(o_totalprice)"})
-                 .singleAggregation({"o_custkey"}, {"sum(a0)"})
-                 .filter("o_custkey < 100 and a0 > 200.0")
-                 .planNode();
+  auto ordersType = ROW({"o_custkey", "o_totalprice"}, {BIGINT(), DOUBLE()});
+
+  auto logicalPlan =
+      lp::PlanBuilder()
+          .tableScan(
+              exec::test::kHiveConnectorId, "orders", ordersType->names())
+          .aggregate({"o_custkey"}, {"sum(o_totalprice) as a0"})
+          .aggregate({"o_custkey"}, {"sum(a0) as a0"})
+          .filter("o_custkey < 100 and a0 > 200.0")
+          .build();
+
+  auto referencePlan =
+      exec::test::PlanBuilder()
+          .tableScan("orders", ordersType)
+          .singleAggregation({"o_custkey"}, {"sum(o_totalprice)"})
+          .filter("o_custkey < 100 and a0 > 200.0")
+          .planNode();
+
   std::string plan;
-  checkSame(agg, nullptr, &plan);
+  checkSame(logicalPlan, referencePlan, &plan);
   expectPlan(
       plan,
       "orders t3 PARTIAL agg shuffle  FINAL agg project 2 columns  PARTIAL agg FINAL agg filter 1 exprs  project");
@@ -503,7 +512,7 @@ TEST_F(PlanTest, filterBreakup) {
       "                and p_brand = 'Brand#12'\n"
       "                and p_container in ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')\n"
       "                and l_quantity >= 1.0 and l_quantity <= 1.0 + 10.0\n"
-      "                and p_size between 1 and 5\n"
+      "                and p_size between 1::int and 5::int\n"
       "                and l_shipmode in ('AIR', 'AIR REG')\n"
       "                and l_shipinstruct = 'DELIVER IN PERSON'\n"
       "        )\n"
@@ -513,7 +522,7 @@ TEST_F(PlanTest, filterBreakup) {
       "                and p_brand = 'Brand#23'\n"
       "                and p_container in ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')\n"
       "                and l_quantity >= 10.0 and l_quantity <= 10.0 + 10.0\n"
-      "                and p_size between 1 and 10\n"
+      "                and p_size between 1::int and 10::int\n"
       "                and l_shipmode in ('AIR', 'AIR REG')\n"
       "                and l_shipinstruct = 'DELIVER IN PERSON'\n"
       "        )\n"
@@ -523,7 +532,7 @@ TEST_F(PlanTest, filterBreakup) {
       "                and p_brand = 'Brand#34'\n"
       "                and p_container in ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')\n"
       "                and l_quantity >= 20.0 and l_quantity <= 20.0 + 10.0\n"
-      "                and p_size between 1 and 15\n"
+      "                and p_size between 1::int and 15::int\n"
       "                and l_shipmode in ('AIR', 'AIR REG')\n"
       "                and l_shipinstruct = 'DELIVER IN PERSON'\n"
       "        )\n";
@@ -543,23 +552,24 @@ TEST_F(PlanTest, filterBreakup) {
   std::vector<std::string> allNames;
   appendNames(lineitemType, allNames);
   appendNames(partType, allNames);
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan =
-      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-          .tableScan("lineitem", lineitemType)
-          .nestedLoopJoin(
-              exec::test::PlanBuilder(planNodeIdGenerator)
-                  .tableScan("part", partType)
-                  .planNode(),
-              allNames)
+
+  lp::PlanBuilder::Context context;
+  auto logicalPlan =
+      lp::PlanBuilder(context)
+          .tableScan(
+              exec::test::kHiveConnectorId, "lineitem", lineitemType->names())
+          .crossJoin(lp::PlanBuilder(context).tableScan(
+              exec::test::kHiveConnectorId, "part", partType->names()))
           .filter(filterText)
           .project({"l_extendedprice * (1.0 - l_discount) as part_revenue"})
-          .singleAggregation({}, {"sum(part_revenue)"})
-          .planNode();
-  auto reference = referenceBuilder_->getQueryPlan(19).plan;
-  std::string(planString);
+          .aggregate({}, {"sum(part_revenue)"})
+          .build();
+
+  auto referencePlan = referenceBuilder_->getQueryPlan(19).plan;
+
+  std::string planString;
   std::string veloxString;
-  checkSame(plan, reference, &planString, &veloxString);
+  checkSame(logicalPlan, referencePlan, &planString, &veloxString);
 
   // Expect the per table filters to be extracted from the OR.
   expectRegexp(

@@ -117,6 +117,10 @@ class PlanBuilder {
       const std::string& condition,
       JoinType joinType);
 
+  PlanBuilder& crossJoin(const PlanBuilder& right) {
+    return join(right, /* condition */ "", JoinType::kInner);
+  }
+
   PlanBuilder& unionAll(const PlanBuilder& other);
 
   PlanBuilder& intersect(const PlanBuilder& other);
