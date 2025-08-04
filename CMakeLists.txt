@@ -39,6 +39,7 @@ set(VELOX_BUILD_VECTOR_TEST_UTILS
     CACHE BOOL "Velox vector test utilities (VectorMaker).")
 
 set(VELOX_ENABLE_PARQUET ON)
+set(VELOX_ENABLE_BENCHMARKS ON)
 
 set(VELOX_DEPENDENCY_SOURCE
     AUTO
@@ -115,8 +116,6 @@ velox_resolve_dependency(glog)
 
 velox_set_source(gflags)
 velox_resolve_dependency(gflags COMPONENTS shared)
-
-set(BOOST_INCLUDE_LIBRARIES algorithm context filesystem program_options)
 
 velox_set_source(Boost)
 velox_resolve_dependency(Boost 1.77.0 COMPONENTS ${BOOST_INCLUDE_LIBRARIES})

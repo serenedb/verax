@@ -1,0 +1,107 @@
+# Copyright (c) Meta Platforms, Inc. and its affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Linux Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+      - '!*.md'
+      - '!docs/**'
+      - '!.github/workflows/*.md'
+  pull_request:
+    paths:
+      - '**'
+      - '!*.md'
+      - '!docs/**'
+      - '!.github/workflows/*.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.repository }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build-verax:
+    name: Build Verax
+    runs-on: 16-core-ubuntu
+    container:
+      image: ghcr.io/facebookincubator/velox-dev:centos9
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/ccache
+      VELOX_DEPENDENCY_SOURCE: SYSTEM
+      ICU_SOURCE: SYSTEM
+    steps:
+      - name: Ensure Ccache Dir Exists
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p "$CCACHE_DIR"
+
+      # Get ccache from stash
+      - name: Get Ccache Stash
+        uses: apache/infrastructure-actions/stash/restore@3354c1565d4b0e335b78a76aedd82153a9e144d4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-ubuntu-debug-default-gcc
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      # Configure Git to trust the repository directory
+      - name: Configure Git Safe Directory
+        run: |
+          git config --global --add safe.directory "/__w/verax/verax"
+          git config --global --add safe.directory "*"
+
+      - name: Clear CCache Statistics
+        run: |
+          ccache -sz
+
+      # Build Verax
+      - name: Build Verax Debug
+        id: build-verax
+        env:
+          MAKEFLAGS: NUM_THREADS=8 MAX_HIGH_MEM_JOBS=4 MAX_LINK_JOBS=4
+          CPU_TARGET: "avx"
+        run: |
+          # Build with reduced parallelism
+          make debug
+
+      # Display ccache statistics after build
+      - name: CCache Statistics After Build
+        if: always()  # Run even if build failed
+        run: |
+          echo "CCache statistics after build:"
+          ccache -vs
+
+      # Save ccache for future runs
+      - name: Save ccache
+        uses: apache/infrastructure-actions/stash/save@3354c1565d4b0e335b78a76aedd82153a9e144d4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-ubuntu-debug-default-gcc
+
+      # Run Verax tests (excluding velox tests)
+      - name: Run Debug Tests
+        working-directory: _build/debug
+        run: |
+          ctest -j 8 --output-on-failure --no-tests=error -E "velox"
