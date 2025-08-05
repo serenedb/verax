@@ -189,6 +189,17 @@ TestResult QueryTestBase::runSql(const std::string& sql) {
   return runFragmentedPlan(planAndStats);
 }
 
+namespace {
+void waitForCompletion(const std::shared_ptr<runner::LocalRunner>& runner) {
+  if (runner) {
+    try {
+      runner->waitForCompletion(50000);
+    } catch (const std::exception& /*ignore*/) {
+    }
+  }
+}
+} // namespace
+
 TestResult QueryTestBase::runFragmentedPlan(
     optimizer::PlanAndStats& fragmentedPlan) {
   TestResult result;
@@ -301,16 +312,6 @@ TestResult QueryTestBase::runVelox(
   return runFragmentedPlan(fragmentedPlan);
 }
 
-void QueryTestBase::waitForCompletion(
-    const std::shared_ptr<runner::LocalRunner>& runner) {
-  if (runner) {
-    try {
-      runner->waitForCompletion(50000);
-    } catch (const std::exception& /*ignore*/) {
-    }
-  }
-}
-
 std::string QueryTestBase::veloxString(const std::string& sql) {
   auto plan = planSql(sql);
   VELOX_CHECK_NOT_NULL(plan.plan);
@@ -354,9 +355,10 @@ std::string QueryTestBase::veloxString(
   return out.str();
 }
 
+// static
 void QueryTestBase::expectRegexp(
-    std::string& text,
-    const std::string regexp,
+    const std::string& text,
+    const std::string& regexp,
     bool expect) {
   std::istringstream iss(text);
   std::string line;
@@ -367,9 +369,51 @@ void QueryTestBase::expectRegexp(
       break;
     }
   }
-  if (found != expect) {
-    FAIL() << "Expected " << (expect == false ? " no " : "") << regexp << " in "
-           << text;
+  ASSERT_EQ(found, expect) << "Expected " << (expect == false ? " no " : "")
+                           << regexp << " in " << text;
+}
+
+namespace {
+// Breaks str into tokens at whitespace and punctuation. Returns tokens as
+// string, character position pairs.
+std::vector<std::pair<std::string, int32_t>> tokenize(const std::string& str) {
+  std::vector<std::pair<std::string, int32_t>> result;
+  std::string token;
+  for (auto i = 0; i < str.size(); ++i) {
+    char c = str[i];
+    if (strchr(" \n\t", c)) {
+      if (token.empty()) {
+        continue;
+      }
+      auto offset = i - token.size();
+      result.push_back(std::make_pair(std::move(token), offset));
+    } else if (strchr("()[]*%", c)) {
+      if (!token.empty()) {
+        auto offset = i - token.size();
+        result.push_back(std::make_pair(std::move(token), offset));
+      }
+      token.resize(1);
+      token[0] = c;
+      result.push_back(std::make_pair(std::move(token), i));
+    } else {
+      token.push_back(c);
+    }
+  }
+  return result;
+}
+} // namespace
+
+// static
+void QueryTestBase::expectPlan(
+    const std::string& actual,
+    const std::string& expected) {
+  const auto expectedTokens = tokenize(expected);
+  const auto actualTokens = tokenize(actual);
+  for (auto i = 0; i < actualTokens.size() && i < expectedTokens.size(); ++i) {
+    ASSERT_EQ(actualTokens[i].first, expectedTokens[i].first)
+        << "Difference at " << i << " position " << actualTokens[i].second
+        << "= " << actualTokens[i].first << " vs " << expectedTokens[i].first
+        << "\nactual  =" << actual << "\nexpected=" << expected;
   }
 }
 

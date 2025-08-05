@@ -51,14 +51,8 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
 
   void TearDown() override;
 
-  // reads the data directory and picks up new tables.
+  /// Reads the data directory and picks up new tables.
   void tablesCreated();
-
-  core::PlanNodePtr toTableScan(
-      const std::string& id,
-      const std::string& name,
-      const RowTypePtr& rowType,
-      const std::vector<std::string>& columnNames);
 
   TestResult runSql(const std::string& sql);
 
@@ -86,21 +80,42 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
       const logical_plan::LogicalPlanNodePtr& plan,
       std::string* planString = nullptr);
 
+  std::string veloxString(const std::string& sql);
+
+  std::string veloxString(const runner::MultiFragmentPlanPtr& plan);
+
+  static void expectRegexp(
+      const std::string& text,
+      const std::string& regexp,
+      bool expect = true);
+
+  static void expectPlan(
+      const std::string& actual,
+      const std::string& expected);
+
+  core::DuckDbQueryPlanner& planner() {
+    return *planner_;
+  }
+
+  static VeloxHistory& suiteHistory() {
+    return *suiteHistory_;
+  }
+
+  OptimizerOptions optimizerOptions_;
+  std::shared_ptr<optimizer::SchemaResolver> schema_;
+
+ private:
   template <typename PlanPtr>
   optimizer::PlanAndStats planFromTree(
       const PlanPtr& plan,
       std::string* planString);
 
-  std::string veloxString(const std::string& sql);
+  core::PlanNodePtr toTableScan(
+      const std::string& id,
+      const std::string& name,
+      const RowTypePtr& rowType,
+      const std::vector<std::string>& columnNames);
 
-  std::string veloxString(const runner::MultiFragmentPlanPtr& plan);
-
-  void
-  expectRegexp(std::string& text, const std::string regexp, bool expect = true);
-
-  void waitForCompletion(const std::shared_ptr<runner::LocalRunner>& runner);
-
-  OptimizerOptions optimizerOptions_;
   std::shared_ptr<memory::MemoryPool> rootPool_;
   std::shared_ptr<memory::MemoryPool> optimizerPool_;
   std::shared_ptr<memory::MemoryPool> schemaPool_;
@@ -111,8 +126,7 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
   std::shared_ptr<core::QueryCtx> queryCtx_;
   std::shared_ptr<connector::ConnectorQueryCtx> connectorQueryCtx_;
   std::shared_ptr<connector::Connector> connector_;
-  std::shared_ptr<optimizer::SchemaResolver> schema_;
-  std::unique_ptr<facebook::velox::optimizer::VeloxHistory> history_;
+  std::unique_ptr<velox::optimizer::VeloxHistory> history_;
   std::unique_ptr<core::DuckDbQueryPlanner> planner_;
   inline static int32_t queryCounter_{0};
   inline static std::unique_ptr<VeloxHistory> suiteHistory_;

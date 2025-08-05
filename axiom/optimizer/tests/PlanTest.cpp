@@ -52,7 +52,7 @@ class PlanTest : public virtual test::ParquetTpchTest,
 
   static void TearDownTestCase() {
     if (!FLAGS_history_save_path.empty()) {
-      suiteHistory_->saveToFile(FLAGS_history_save_path);
+      suiteHistory().saveToFile(FLAGS_history_save_path);
     }
     LocalRunnerTestBase::TearDownTestCase();
     ParquetTpchTest::TearDownTestCase();
@@ -64,12 +64,6 @@ class PlanTest : public virtual test::ParquetTpchTest,
     allocator_ = std::make_unique<HashStringAllocator>(pool_.get());
     context_ = std::make_unique<QueryGraphContext>(*allocator_);
     queryCtx() = context_.get();
-    builder_ = std::make_unique<exec::test::TpchQueryBuilder>(
-        dwio::common::FileFormat::PARQUET, true);
-    builder_->initialize(FLAGS_data_path);
-    referenceBuilder_ = std::make_unique<exec::test::TpchQueryBuilder>(
-        dwio::common::FileFormat::PARQUET);
-    referenceBuilder_->initialize(FLAGS_data_path);
 
     testConnector_ =
         std::make_shared<connector::TestConnector>(kTestConnectorId);
@@ -83,32 +77,6 @@ class PlanTest : public virtual test::ParquetTpchTest,
     ParquetTpchTest::TearDown();
     QueryTestBase::TearDown();
     connector::unregisterConnector(kTestConnectorId);
-  }
-
-  void checkSameTpch(
-      const core::PlanNodePtr& planNode,
-      core::PlanNodePtr referencePlan = nullptr,
-      std::string* planString = nullptr,
-      std::string* veloxPlan = nullptr) {
-    auto fragmentedPlan = planVelox(planNode, planString);
-    if (veloxPlan) {
-      *veloxPlan = veloxString(fragmentedPlan.plan);
-    }
-    auto reference = referencePlan ? referencePlan : planNode;
-    test::TestResult referenceResult;
-    assertSame(reference, fragmentedPlan, &referenceResult);
-
-    const auto numWorkers = FLAGS_num_workers;
-    if (numWorkers != 1) {
-      gflags::FlagSaver saver;
-      FLAGS_num_workers = 1;
-
-      auto singlePlan = planVelox(planNode, planString);
-      ASSERT_TRUE(singlePlan.plan != nullptr);
-      auto singleResult = runFragmentedPlan(singlePlan);
-      exec::test::assertEqualResults(
-          referenceResult.results, singleResult.results);
-    }
   }
 
   void checkSame(
@@ -136,70 +104,6 @@ class PlanTest : public virtual test::ParquetTpchTest,
     }
   }
 
-  // Breaks str into tokens at whitespace and punctuation. Returns tokens as
-  // string, character position pairs.
-  static std::vector<std::pair<std::string, int32_t>> tokenize(
-      const std::string& str) {
-    std::vector<std::pair<std::string, int32_t>> result;
-    std::string token;
-    for (auto i = 0; i < str.size(); ++i) {
-      char c = str[i];
-      if (strchr(" \n\t", c)) {
-        if (token.empty()) {
-          continue;
-        }
-        auto offset = i - token.size();
-        result.push_back(std::make_pair(std::move(token), offset));
-      } else if (strchr("()[]*%", c)) {
-        if (!token.empty()) {
-          auto offset = i - token.size();
-          result.push_back(std::make_pair(std::move(token), offset));
-        }
-        token.resize(1);
-        token[0] = c;
-        result.push_back(std::make_pair(std::move(token), i));
-      } else {
-        token.push_back(c);
-      }
-    }
-    return result;
-  }
-
-  static void expectPlan(
-      const std::string& actual,
-      const std::string& expected) {
-    const auto expectedTokens = tokenize(expected);
-    const auto actualTokens = tokenize(actual);
-    for (auto i = 0; i < actualTokens.size() && i < expectedTokens.size();
-         ++i) {
-      if (actualTokens[i].first != expectedTokens[i].first) {
-        FAIL() << "Difference at " << i << " position "
-               << actualTokens[i].second << "= " << actualTokens[i].first
-               << " vs " << expectedTokens[i].first << "\nactual  =" << actual
-               << "\nexpected=" << expected;
-        return;
-      }
-    }
-  }
-
-  void checkTpch(int32_t query, const std::string& expected = "") {
-    auto q = builder_->getQueryPlan(query).plan;
-    auto rq = referenceBuilder_->getQueryPlan(query).plan;
-    std::string planText;
-    checkSameTpch(q, rq, &planText);
-    if (!expected.empty()) {
-      expectPlan(planText, expected);
-    } else {
-      std::cout << " -- plan = " << planText << std::endl;
-    }
-  }
-
-  void appendNames(const RowTypePtr& type, std::vector<std::string>& names) {
-    for (auto i = 0; i < type->size(); ++i) {
-      names.push_back(type->nameOf(i));
-    }
-  }
-
   runner::MultiFragmentPlanPtr toSingleNodePlan(
       const lp::LogicalPlanNodePtr& logicalPlan) {
     gflags::FlagSaver saver;
@@ -216,14 +120,8 @@ class PlanTest : public virtual test::ParquetTpchTest,
 
   std::unique_ptr<HashStringAllocator> allocator_;
   std::unique_ptr<QueryGraphContext> context_;
-  std::unique_ptr<exec::test::TpchQueryBuilder> builder_;
-  std::unique_ptr<exec::test::TpchQueryBuilder> referenceBuilder_;
   std::shared_ptr<connector::TestConnector> testConnector_;
 };
-
-void printPlan(core::PlanNode* plan, bool r, bool d) {
-  std::cout << plan->toString(r, d) << std::endl;
-}
 
 TEST_F(PlanTest, queryGraph) {
   TypePtr row1 = ROW({{"c1", ROW({{"c1a", INTEGER()}})}, {"c2", DOUBLE()}});
@@ -325,108 +223,6 @@ TEST_F(PlanTest, rejectedFilters) {
           testing::StartsWith("    -- TableScan"),
           testing::Eq(""),
           testing::Eq("")));
-}
-
-TEST_F(PlanTest, q1) {
-  checkTpch(1);
-}
-
-TEST_F(PlanTest, q2) {
-  GTEST_SKIP();
-  checkTpch(2);
-}
-
-TEST_F(PlanTest, q3) {
-  checkTpch(
-      3,
-      "lineitem t3 project 3 columns *H  (orders t5 project 4 columns   Build )*H  (customer t7 project 1 columns   Build ) PARTIAL agg FINAL agg project 4 columns");
-}
-TEST_F(PlanTest, q4) {
-  // Incorrect with distributed plan at larger scales.
-  GTEST_SKIP();
-  checkTpch(4);
-}
-
-TEST_F(PlanTest, q5) {
-  checkTpch(5);
-}
-
-TEST_F(PlanTest, q6) {
-  checkTpch(6);
-}
-
-TEST_F(PlanTest, q7) {
-  checkTpch(7);
-}
-
-TEST_F(PlanTest, q8) {
-  checkTpch(8);
-}
-
-TEST_F(PlanTest, q9) {
-  // Plan does not minimize build size. To adjust build cost and check that
-  // import of existences to build side does not affect join cardinality.
-  checkTpch(9);
-}
-
-TEST_F(PlanTest, q10) {
-  checkTpch(10);
-}
-
-TEST_F(PlanTest, q11) {
-  checkTpch(11);
-}
-
-TEST_F(PlanTest, q12) {
-  // Fix string in filter
-  checkTpch(12);
-}
-
-TEST_F(PlanTest, q13) {
-  checkTpch(13);
-}
-
-TEST_F(PlanTest, q14) {
-  checkTpch(14);
-}
-
-TEST_F(PlanTest, q15) {
-  GTEST_SKIP();
-  checkTpch(15);
-}
-
-TEST_F(PlanTest, q16) {
-  GTEST_SKIP();
-  checkTpch(16);
-}
-
-TEST_F(PlanTest, q17) {
-  GTEST_SKIP();
-  checkTpch(17);
-}
-
-TEST_F(PlanTest, q18) {
-  GTEST_SKIP();
-  checkTpch(18);
-}
-
-TEST_F(PlanTest, q19) {
-  checkTpch(19);
-}
-
-TEST_F(PlanTest, q20) {
-  GTEST_SKIP();
-  checkTpch(20);
-}
-
-TEST_F(PlanTest, q21) {
-  GTEST_SKIP();
-  checkTpch(21);
-}
-
-TEST_F(PlanTest, q22) {
-  GTEST_SKIP();
-  checkTpch(22);
 }
 
 TEST_F(PlanTest, filterToJoinEdge) {
@@ -549,9 +345,6 @@ TEST_F(PlanTest, filterBreakup) {
        {"p_brand", VARCHAR()},
        {"p_container", VARCHAR()},
        {"p_size", INTEGER()}});
-  std::vector<std::string> allNames;
-  appendNames(lineitemType, allNames);
-  appendNames(partType, allNames);
 
   lp::PlanBuilder::Context context;
   auto logicalPlan =
@@ -565,7 +358,11 @@ TEST_F(PlanTest, filterBreakup) {
           .aggregate({}, {"sum(part_revenue)"})
           .build();
 
-  auto referencePlan = referenceBuilder_->getQueryPlan(19).plan;
+  auto referenceBuilder = std::make_unique<exec::test::TpchQueryBuilder>(
+      dwio::common::FileFormat::PARQUET);
+  referenceBuilder->initialize(FLAGS_data_path);
+
+  auto referencePlan = referenceBuilder->getQueryPlan(19).plan;
 
   std::string planString;
   std::string veloxString;

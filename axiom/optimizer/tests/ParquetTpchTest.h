@@ -16,20 +16,9 @@
 
 #pragma once
 
-#include <vector>
+#include <gtest/gtest.h>
 
-#include "velox/common/file/FileSystems.h"
-#include "velox/connectors/tpch/TpchConnector.h"
-#include "velox/dwio/parquet/RegisterParquetReader.h"
-#include "velox/dwio/parquet/RegisterParquetWriter.h"
-#include "velox/exec/tests/utils/AssertQueryBuilder.h"
-#include "velox/exec/tests/utils/HiveConnectorTestBase.h"
-#include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/exec/tests/utils/TpchQueryBuilder.h"
-#include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
-#include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/parse/TypeResolver.h"
 
 DECLARE_string(data_path);
 DECLARE_bool(create_dataset);
@@ -42,28 +31,12 @@ class ParquetTpchTest : public virtual testing::Test {
 
   static void TearDownTestCase();
 
+ private:
   static void saveTpchTablesAsParquet();
 
-  void assertQuery(
-      int queryId,
-      const std::optional<std::vector<uint32_t>>& sortingKeys = {}) {
-    auto tpchPlan = tpchBuilder_->getQueryPlan(queryId);
-    auto duckDbSql = tpch::getQuery(queryId);
-    assertQuery(tpchPlan, duckDbSql, sortingKeys);
-  }
-
-  std::shared_ptr<exec::Task> assertQuery(
-      const exec::test::TpchPlan& tpchPlan,
-      const std::string& duckQuery,
-      const std::optional<std::vector<uint32_t>>& sortingKeys) const;
-
-  static std::shared_ptr<exec::test::DuckDbQueryRunner> duckDb_;
   static std::string createPath_;
   static std::string path_;
   static std::shared_ptr<exec::test::TempDirectoryPath> tempDirectory_;
-  static std::shared_ptr<exec::test::TpchQueryBuilder> tpchBuilder_;
-
-  static constexpr char const* kTpchConnectorId{"test-tpch"};
 };
 
 } // namespace facebook::velox::optimizer::test
