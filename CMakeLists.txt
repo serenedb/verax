@@ -16,9 +16,6 @@ cmake_minimum_required(VERSION 3.14)
 # Set the project name.
 project(Verax)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
-
 add_compile_definitions(DISABLE_META_INTERNAL_COMPRESSOR=1)
 
 # Sets new behavior for CMP0135, which controls how timestamps are extracted
@@ -31,7 +28,7 @@ endif()
 
 # Use ThirdPartyToolchain dependencies macros from Velox.
 list(PREPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/CMake"
-     "${PROJECT_SOURCE_DIR}/velox/CMake")
+     "${CMAKE_CURRENT_SOURCE_DIR}/../velox/CMake")
 include(ResolveDependency)
 
 set(VELOX_BUILD_VECTOR_TEST_UTILS
@@ -94,7 +91,7 @@ endif()
 execute_process(
   COMMAND
     bash -c
-    "( source ${CMAKE_CURRENT_SOURCE_DIR}/velox/scripts/setup-helper-functions.sh && echo -n $(get_cxx_flags $ENV{CPU_TARGET}))"
+    "( source ${CMAKE_CURRENT_SOURCE_DIR}/../velox/scripts/setup-helper-functions.sh && echo -n $(get_cxx_flags $ENV{CPU_TARGET}))"
   OUTPUT_VARIABLE SCRIPT_CXX_FLAGS
   RESULT_VARIABLE COMMAND_STATUS)
 
@@ -123,14 +120,5 @@ velox_resolve_dependency(Boost 1.77.0 COMPONENTS ${BOOST_INCLUDE_LIBRARIES})
 velox_set_source(folly)
 velox_resolve_dependency(folly)
 
-# Use xxhash and xsimd from Velox for now.
-include_directories(.)
-include_directories(${CMAKE_BINARY_DIR})
-include_directories(${CMAKE_BINARY_DIR}/velox)
-include_directories(SYSTEM velox)
-include_directories(SYSTEM velox/velox/external/xxhash axiom)
-include_directories(SYSTEM ${CMAKE_BINARY_DIR}/_deps/xsimd-src/include/)
-
-add_subdirectory(velox)
 add_subdirectory(axiom/optimizer)
 add_subdirectory(axiom/logical_plan)

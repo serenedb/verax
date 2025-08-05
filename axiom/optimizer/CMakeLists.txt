@@ -14,8 +14,6 @@
 
 add_subdirectory(tests)
 
-add_subdirectory(connectors)
-
 add_library(velox_md_model Model.cpp)
 
 target_link_libraries(velox_md_model velox_exception)
@@ -48,8 +46,6 @@ add_library(
   ToVelox.cpp
   VeloxHistory.cpp
   JoinSample.cpp)
-
-add_dependencies(velox_verax velox_hive_connector)
 
 target_link_libraries(
   velox_verax
