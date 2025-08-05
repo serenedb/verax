@@ -143,6 +143,17 @@ class RelationOp : public Relation {
 
   /// Returns human redable string for 'this' and inputs if 'recursive' is true.
   /// If 'detail' is true, includes cost and other details.
+  ///
+  /// Example,
+  ///
+  ///   region t3*H  (nation t2  Build ) project 2 columns
+  ///
+  /// reads as
+  ///
+  ///   - Project -> 2 columns
+  ///     - HashJoin
+  ///       - Scan(region as t3)
+  ///       - Scan(nation as t2)
   virtual std::string toString(bool recursive, bool detail) const;
 
  protected:

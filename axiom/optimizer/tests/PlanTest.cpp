@@ -168,14 +168,14 @@ class PlanTest : public virtual test::ParquetTpchTest,
   static void expectPlan(
       const std::string& actual,
       const std::string& expected) {
-    auto expectedTokens = tokenize(expected);
-    auto actualTokens = tokenize(expected);
+    const auto expectedTokens = tokenize(expected);
+    const auto actualTokens = tokenize(actual);
     for (auto i = 0; i < actualTokens.size() && i < expectedTokens.size();
          ++i) {
       if (actualTokens[i].first != expectedTokens[i].first) {
         FAIL() << "Difference at " << i << " position "
                << actualTokens[i].second << "= " << actualTokens[i].first
-               << " vs " << expectedTokens[i].first << "\na actual= " << actual
+               << " vs " << expectedTokens[i].first << "\nactual  =" << actual
                << "\nexpected=" << expected;
         return;
       }
@@ -339,7 +339,7 @@ TEST_F(PlanTest, q2) {
 TEST_F(PlanTest, q3) {
   checkTpch(
       3,
-      "lineitem t2 shuffle *H  (orders t3*H  (customer t4 broadcast   Build ) shuffle   Build ) PARTIAL agg shuffle  FINAL agg");
+      "lineitem t3 project 3 columns *H  (orders t5 project 4 columns   Build )*H  (customer t7 project 1 columns   Build ) PARTIAL agg FINAL agg project 4 columns");
 }
 TEST_F(PlanTest, q4) {
   // Incorrect with distributed plan at larger scales.
@@ -457,7 +457,7 @@ TEST_F(PlanTest, filterToJoinEdge) {
 
   std::string plan;
   checkSame(logicalPlan, referencePlan, &plan);
-  expectPlan(plan, "nation t2*H  (region t3  Build ) project");
+  expectPlan(plan, "region t3*H  (nation t2  Build ) project 2 columns");
 
   logicalPlan =
       lp::PlanBuilder(context)
@@ -476,7 +476,7 @@ TEST_F(PlanTest, filterToJoinEdge) {
   checkSame(logicalPlan, referencePlan, &plan);
   expectPlan(
       plan,
-      "nation t5 filter 1 exprs  project 1 columns  project 1 columns *H  (region t8 filter 1 exprs  project 1 columns  project 1 columns  broadcast   Build ) filter 1 exprs  project 2 columns  project 2 columns ");
+      "nation t5 filter 1 exprs  project 1 columns  project 1 columns *H  (region t8 filter 1 exprs  project 1 columns  project 1 columns   Build ) filter 1 exprs  project 2 columns  project 2 columns");
 }
 
 TEST_F(PlanTest, filterImport) {
@@ -502,7 +502,7 @@ TEST_F(PlanTest, filterImport) {
   checkSame(logicalPlan, referencePlan, &plan);
   expectPlan(
       plan,
-      "orders t3 PARTIAL agg shuffle  FINAL agg project 2 columns  PARTIAL agg FINAL agg filter 1 exprs  project");
+      "orders t3 PARTIAL agg FINAL agg project 2 columns  PARTIAL agg FINAL agg filter 1 exprs  project 2 columns");
 }
 
 TEST_F(PlanTest, filterBreakup) {
@@ -745,7 +745,7 @@ TEST_F(PlanTest, intersect) {
   // Expect the in filter to be absorbed into the first scan. 2 existences.
   expectPlan(
       planString,
-      "nation t8 project 2 columns  shuffle *H right exists (nation t4 project 2 columns  shuffle   Build )*H exists (nation t6 project 2 columns  broadcast   Build ) PARTIAL agg shuffle  FINAL agg project 2 columns  project 1 columns ");
+      "nation t8 project 2 columns *H right exists (nation t6 project 2 columns *H right exists (nation t4 project 2 columns   Build )  Build ) PARTIAL agg FINAL agg project 2 columns  project 1 columns");
 }
 
 TEST_F(PlanTest, except) {
@@ -792,7 +792,7 @@ TEST_F(PlanTest, except) {
   checkSame(exceptPlan, veloxPlan, &planString);
   expectPlan(
       planString,
-      "nation t4 project 2 columns *H not exists (nation t6 project 2 columns  broadcast   Build )*H not exists (nation t8 project 2 columns  broadcast   Build ) PARTIAL agg shuffle  FINAL agg project 2 columns  project 2 columns ");
+      "nation t4 project 2 columns *H not exists (nation t6 project 2 columns   Build )*H not exists (nation t8 project 2 columns   Build ) PARTIAL agg FINAL agg project 2 columns  project 2 columns");
 }
 
 } // namespace
