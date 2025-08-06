@@ -15,10 +15,10 @@
  */
 #pragma once
 
-#include <velox/vector/ComplexVector.h>
 #include "axiom/logical_plan/Expr.h"
 #include "velox/common/Enums.h"
 #include "velox/type/Variant.h"
+#include "velox/vector/ComplexVector.h"
 
 namespace facebook::velox::logical_plan {
 
