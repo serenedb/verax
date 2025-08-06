@@ -16,6 +16,8 @@
 
 #include "axiom/optimizer/tests/PlanMatcher.h"
 #include <gtest/gtest.h>
+#include "velox/connectors/hive/TableHandle.h"
+#include "velox/parse/ExpressionsParser.h"
 
 namespace facebook::velox::core {
 namespace {
@@ -25,7 +27,7 @@ class PlanMatcherImpl : public PlanMatcher {
  public:
   PlanMatcherImpl() = default;
 
-  PlanMatcherImpl(
+  explicit PlanMatcherImpl(
       const std::vector<std::shared_ptr<PlanMatcher>>& sourceMatchers)
       : sourceMatchers_{sourceMatchers} {}
 
@@ -54,7 +56,7 @@ class PlanMatcherImpl : public PlanMatcher {
     return matchDetails(*specificNode);
   }
 
- private:
+ protected:
   virtual bool matchDetails(const T& plan) const {
     return true;
   }
@@ -62,18 +64,196 @@ class PlanMatcherImpl : public PlanMatcher {
   const std::vector<std::shared_ptr<PlanMatcher>> sourceMatchers_;
 };
 
+class TableScanMatcher : public PlanMatcherImpl<TableScanNode> {
+ public:
+  explicit TableScanMatcher() : PlanMatcherImpl<TableScanNode>() {}
+
+  explicit TableScanMatcher(const std::string& tableName)
+      : PlanMatcherImpl<TableScanNode>(), tableName_{tableName} {}
+
+  bool matchDetails(const TableScanNode& plan) const override {
+    if (tableName_.has_value()) {
+      EXPECT_EQ(plan.tableHandle()->name(), tableName_.value());
+      if (::testing::Test::HasNonfatalFailure()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  const std::optional<std::string> tableName_;
+};
+
+class HiveScanMatcher : public PlanMatcherImpl<TableScanNode> {
+ public:
+  HiveScanMatcher(
+      const std::string& tableName,
+      common::SubfieldFilters subfieldFilters)
+      : PlanMatcherImpl<TableScanNode>(),
+        tableName_{tableName},
+        subfieldFilters_{std::move(subfieldFilters)} {}
+
+  bool matchDetails(const TableScanNode& plan) const override {
+    const auto* hiveTableHandle =
+        dynamic_cast<const connector::hive::HiveTableHandle*>(
+            plan.tableHandle().get());
+    EXPECT_TRUE(hiveTableHandle != nullptr);
+    if (::testing::Test::HasNonfatalFailure()) {
+      return false;
+    }
+
+    EXPECT_EQ(hiveTableHandle->name(), tableName_);
+    if (::testing::Test::HasNonfatalFailure()) {
+      return false;
+    }
+
+    const auto& filters = hiveTableHandle->subfieldFilters();
+    EXPECT_EQ(filters.size(), subfieldFilters_.size());
+    if (::testing::Test::HasNonfatalFailure()) {
+      return false;
+    }
+
+    for (const auto& [name, filter] : filters) {
+      EXPECT_TRUE(subfieldFilters_.contains(name))
+          << "Expected filter on " << name;
+      if (::testing::Test::HasNonfatalFailure()) {
+        return false;
+      }
+
+      const auto& expected = subfieldFilters_.at(name);
+
+      EXPECT_TRUE(filter->testingEquals(*expected))
+          << "Expected filter on " << name << ": " << expected->toString()
+          << ", but got " << filter->toString();
+      if (::testing::Test::HasNonfatalFailure()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  const std::string tableName_;
+  const common::SubfieldFilters subfieldFilters_;
+};
+
+class FilterMatcher : public PlanMatcherImpl<FilterNode> {
+ public:
+  explicit FilterMatcher(const std::shared_ptr<PlanMatcher>& matcher)
+      : PlanMatcherImpl<FilterNode>({matcher}) {}
+
+  FilterMatcher(
+      const std::shared_ptr<PlanMatcher>& matcher,
+      const std::string& predicate)
+      : PlanMatcherImpl<FilterNode>({matcher}), predicate_{predicate} {}
+
+  bool matchDetails(const FilterNode& plan) const override {
+    if (predicate_.has_value()) {
+      auto expected = parse::parseExpr(predicate_.value(), {});
+      EXPECT_EQ(plan.filter()->toString(), expected->toString());
+      if (::testing::Test::HasNonfatalFailure()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  const std::optional<std::string> predicate_;
+};
+
+class AggregationMatcher : public PlanMatcherImpl<AggregationNode> {
+ public:
+  explicit AggregationMatcher(const std::shared_ptr<PlanMatcher>& matcher)
+      : PlanMatcherImpl<AggregationNode>({matcher}) {}
+
+  AggregationMatcher(
+      const std::shared_ptr<PlanMatcher>& matcher,
+      AggregationNode::Step step)
+      : PlanMatcherImpl<AggregationNode>({matcher}), step_{step} {}
+
+  bool matchDetails(const AggregationNode& plan) const override {
+    if (step_.has_value()) {
+      EXPECT_EQ(plan.step(), step_.value());
+      if (::testing::Test::HasNonfatalFailure()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  const std::optional<AggregationNode::Step> step_;
+};
+
+class HashJoinMatcher : public PlanMatcherImpl<HashJoinNode> {
+ public:
+  explicit HashJoinMatcher(
+      const std::shared_ptr<PlanMatcher>& left,
+      const std::shared_ptr<PlanMatcher>& right)
+      : PlanMatcherImpl<HashJoinNode>({left, right}) {}
+
+  HashJoinMatcher(
+      const std::shared_ptr<PlanMatcher>& left,
+      const std::shared_ptr<PlanMatcher>& right,
+      JoinType joinType)
+      : PlanMatcherImpl<HashJoinNode>({left, right}), joinType_{joinType} {}
+
+  bool matchDetails(const HashJoinNode& plan) const override {
+    if (joinType_.has_value()) {
+      EXPECT_EQ(
+          JoinTypeName::toName(plan.joinType()),
+          JoinTypeName::toName(joinType_.value()));
+      if (::testing::Test::HasNonfatalFailure()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  const std::optional<JoinType> joinType_;
+};
+
 } // namespace
 
 PlanMatcherBuilder& PlanMatcherBuilder::tableScan() {
   VELOX_USER_CHECK_NULL(matcher_);
-  matcher_ = std::make_shared<PlanMatcherImpl<TableScanNode>>();
+  matcher_ = std::make_shared<TableScanMatcher>();
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::tableScan(
+    const std::string& tableName) {
+  VELOX_USER_CHECK_NULL(matcher_);
+  matcher_ = std::make_shared<TableScanMatcher>(tableName);
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::hiveScan(
+    const std::string& tableName,
+    common::SubfieldFilters subfieldFilters) {
+  VELOX_USER_CHECK_NULL(matcher_);
+  matcher_ =
+      std::make_shared<HiveScanMatcher>(tableName, std::move(subfieldFilters));
   return *this;
 }
 
 PlanMatcherBuilder& PlanMatcherBuilder::filter() {
   VELOX_USER_CHECK_NOT_NULL(matcher_);
-  matcher_ = std::make_shared<PlanMatcherImpl<FilterNode>>(
-      std::vector<std::shared_ptr<PlanMatcher>>{matcher_});
+  matcher_ = std::make_shared<FilterMatcher>(matcher_);
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::filter(const std::string& predicate) {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<FilterMatcher>(matcher_, predicate);
   return *this;
 }
 
@@ -86,8 +266,37 @@ PlanMatcherBuilder& PlanMatcherBuilder::project() {
 
 PlanMatcherBuilder& PlanMatcherBuilder::aggregation() {
   VELOX_USER_CHECK_NOT_NULL(matcher_);
-  matcher_ = std::make_shared<PlanMatcherImpl<AggregationNode>>(
-      std::vector<std::shared_ptr<PlanMatcher>>{matcher_});
+  matcher_ = std::make_shared<AggregationMatcher>(matcher_);
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::partialAggregation() {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<AggregationMatcher>(
+      matcher_, AggregationNode::Step::kPartial);
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::finalAggregation() {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<AggregationMatcher>(
+      matcher_, AggregationNode::Step::kFinal);
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::hashJoin(
+    const std::shared_ptr<PlanMatcher>& rightMatcher) {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<HashJoinMatcher>(matcher_, rightMatcher);
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::hashJoin(
+    const std::shared_ptr<PlanMatcher>& rightMatcher,
+    JoinType joinType) {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ =
+      std::make_shared<HashJoinMatcher>(matcher_, rightMatcher, joinType);
   return *this;
 }
 
@@ -95,6 +304,14 @@ PlanMatcherBuilder& PlanMatcherBuilder::localPartition() {
   VELOX_USER_CHECK_NOT_NULL(matcher_);
   matcher_ = std::make_shared<PlanMatcherImpl<LocalPartitionNode>>(
       std::vector<std::shared_ptr<PlanMatcher>>{matcher_});
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::localPartition(
+    const std::shared_ptr<PlanMatcher>& matcher) {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<PlanMatcherImpl<LocalPartitionNode>>(
+      std::vector<std::shared_ptr<PlanMatcher>>{matcher_, matcher});
   return *this;
 }
 

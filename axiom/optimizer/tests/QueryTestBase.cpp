@@ -367,24 +367,6 @@ std::string QueryTestBase::veloxString(
   return out.str();
 }
 
-// static
-void QueryTestBase::expectRegexp(
-    const std::string& text,
-    const std::string& regexp,
-    bool expect) {
-  std::istringstream iss(text);
-  std::string line;
-  bool found = false;
-  for (; std::getline(iss, line);) {
-    if (RE2::PartialMatch(line, regexp)) {
-      found = true;
-      break;
-    }
-  }
-  ASSERT_EQ(found, expect) << "Expected " << (expect == false ? " no " : "")
-                           << regexp << " in " << text;
-}
-
 namespace {
 // Breaks str into tokens at whitespace and punctuation. Returns tokens as
 // string, character position pairs.

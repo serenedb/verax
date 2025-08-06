@@ -18,6 +18,7 @@
 #include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/tests/FeatureGen.h"
 #include "axiom/optimizer/tests/Genies.h"
+#include "axiom/optimizer/tests/PlanMatcher.h"
 #include "axiom/optimizer/tests/QueryTestBase.h"
 #include "axiom/optimizer/tests/utils/DfFunctions.h"
 #include "velox/common/base/tests/GTestUtils.h"
@@ -247,9 +248,15 @@ class LogicalSubfieldTest : public QueryTestBase,
     assertSame(veloxPlan, fragmentedPlan);
   }
 
+  std::string subfield(const std::string& first, const std::string& rest = "")
+      const {
+    return GetParam() == 3 ? fmt::format(".{}{}", first, rest)
+                           : fmt::format("[{}]{}", first, rest);
+  };
+
   void testMakeRowFromMap() {
     lp::PlanBuilder::Context ctx(getQueryCtx(), resolveDfFunction);
-    auto logical =
+    auto logicalPlan =
         lp::PlanBuilder(ctx)
             .tableScan(
                 exec::test::kHiveConnectorId,
@@ -259,7 +266,6 @@ class LogicalSubfieldTest : public QueryTestBase,
                 exec::test::kHiveConnectorId,
                 "features",
                 {"float_features", "id_list_features"}))
-
             .project(
                 {"make_row_from_map(float_features, array[10010, 10020, 10030], array['f1', 'f2', 'f3']) as r"})
             .project(
@@ -268,20 +274,13 @@ class LogicalSubfieldTest : public QueryTestBase,
             .project({"make_named_row('rf2', named.f2b * 2::REAL) as fin"})
             .build();
 
-    std::string planString;
-    auto plan = planVelox(logical, &planString);
-    expectPlan(
-        planString,
-        "(features t4 project 1 columns  union all features t6 project 1 columns ) project 1 columns ");
-    auto exe = veloxString(plan.plan);
-    // Filters should be pushed down to scan.
-    expectRegexp(
-        exe,
-        "remaining filter: .lt.plus.subscript.*float_features.*10010..1..10000");
-    expectRegexp(
-        exe, "requiredSubfields.*float_features.10010.*float_features.10020");
-    // 10030 is not referenced, expect not in plan.
-    expectRegexp(exe, "10030", false);
+    auto fragmentedPlan = planVelox(logicalPlan);
+
+    verifyRequiredSubfields(
+        extractPlanNode(fragmentedPlan),
+        {{"float_features", {subfield("10010"), subfield("10020")}}});
+
+    // TODO Verify remaining filter and overall plan shape.
   }
 
   void createTable(
@@ -385,11 +384,6 @@ TEST_P(LogicalSubfieldTest, maps) {
       dwrf::Config::MAP_FLAT_COLS, {2, 3, 4});
 
   createTable("features", vectors, config);
-
-  auto subfield = [&](const std::string& first, const std::string& rest = "") {
-    return GetParam() == 3 ? fmt::format(".{}{}", first, rest)
-                           : fmt::format("[{}]{}", first, rest);
-  };
 
   testMakeRowFromMap();
 

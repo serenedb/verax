@@ -86,11 +86,6 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
 
   std::string veloxString(const runner::MultiFragmentPlanPtr& plan);
 
-  static void expectRegexp(
-      const std::string& text,
-      const std::string& regexp,
-      bool expect = true);
-
   static void expectPlan(
       const std::string& actual,
       const std::string& expected);

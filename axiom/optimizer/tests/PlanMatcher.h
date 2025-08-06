@@ -17,6 +17,7 @@
 #pragma once
 
 #include "velox/core/PlanNode.h"
+#include "velox/type/Filter.h"
 
 namespace facebook::velox::core {
 
@@ -31,13 +32,35 @@ class PlanMatcherBuilder {
  public:
   PlanMatcherBuilder& tableScan();
 
+  PlanMatcherBuilder& tableScan(const std::string& tableName);
+
+  PlanMatcherBuilder& hiveScan(
+      const std::string& tableName,
+      common::SubfieldFilters subfieldFilters);
+
   PlanMatcherBuilder& filter();
+
+  PlanMatcherBuilder& filter(const std::string& predicate);
 
   PlanMatcherBuilder& project();
 
   PlanMatcherBuilder& aggregation();
 
+  PlanMatcherBuilder& partialAggregation();
+
+  PlanMatcherBuilder& finalAggregation();
+
+  PlanMatcherBuilder& hashJoin(
+      const std::shared_ptr<PlanMatcher>& rightMatcher);
+
+  PlanMatcherBuilder& hashJoin(
+      const std::shared_ptr<PlanMatcher>& rightMatcher,
+      JoinType joinType);
+
   PlanMatcherBuilder& localPartition();
+
+  PlanMatcherBuilder& localPartition(
+      const std::shared_ptr<PlanMatcher>& matcher);
 
   std::shared_ptr<PlanMatcher> build() {
     return matcher_;

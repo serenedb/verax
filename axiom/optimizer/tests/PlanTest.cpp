@@ -25,6 +25,8 @@
 #include "axiom/optimizer/tests/PlanMatcher.h"
 #include "axiom/optimizer/tests/QueryTestBase.h"
 #include "velox/exec/tests/utils/TpchQueryBuilder.h"
+#include "velox/expression/ExprToSubfieldFilter.h"
+#include "velox/type/tests/SubfieldFiltersBuilder.h"
 
 DEFINE_int32(num_repeats, 1, "Number of repeats for optimization timing");
 
@@ -82,23 +84,23 @@ class PlanTest : public virtual test::ParquetTpchTest,
 
   void checkSame(
       const lp::LogicalPlanNodePtr& planNode,
-      core::PlanNodePtr referencePlan,
-      std::string* planString = nullptr,
-      std::string* veloxPlan = nullptr) {
+      core::PlanNodePtr referencePlan) {
     VELOX_CHECK_NOT_NULL(referencePlan);
 
-    auto fragmentedPlan = planVelox(planNode, planString);
-    if (veloxPlan) {
-      *veloxPlan = veloxString(fragmentedPlan.plan);
-    }
+    auto fragmentedPlan = planVelox(planNode);
+    ASSERT_TRUE(fragmentedPlan.plan != nullptr);
+
     optimizer::test::TestResult referenceResult;
     assertSame(referencePlan, fragmentedPlan, &referenceResult);
+
     auto numWorkers = FLAGS_num_workers;
     if (numWorkers != 1) {
       gflags::FlagSaver saver;
       FLAGS_num_workers = 1;
-      auto singlePlan = planVelox(planNode, planString);
+
+      auto singlePlan = planVelox(planNode);
       ASSERT_TRUE(singlePlan.plan != nullptr);
+
       auto singleResult = runFragmentedPlan(singlePlan);
       exec::test::assertEqualResults(
           referenceResult.results, singleResult.results);
@@ -106,12 +108,13 @@ class PlanTest : public virtual test::ParquetTpchTest,
   }
 
   core::PlanNodePtr toSingleNodePlan(
-      const lp::LogicalPlanNodePtr& logicalPlan) {
+      const lp::LogicalPlanNodePtr& logicalPlan,
+      const std::shared_ptr<connector::Connector>& defaultConnector = nullptr) {
     gflags::FlagSaver saver;
     FLAGS_num_workers = 1;
 
-    schema_ =
-        std::make_shared<velox::optimizer::SchemaResolver>(testConnector_, "");
+    schema_ = std::make_shared<velox::optimizer::SchemaResolver>(
+        defaultConnector == nullptr ? testConnector_ : defaultConnector, "");
 
     auto plan = planVelox(logicalPlan).plan;
 
@@ -123,6 +126,26 @@ class PlanTest : public virtual test::ParquetTpchTest,
   std::unique_ptr<QueryGraphContext> context_;
   std::shared_ptr<connector::TestConnector> testConnector_;
 };
+
+auto gte(const std::string& name, int64_t n) {
+  return common::test::singleSubfieldFilter(name, exec::greaterThanOrEqual(n));
+}
+
+auto lte(const std::string& name, int64_t n) {
+  return common::test::singleSubfieldFilter(name, exec::lessThanOrEqual(n));
+}
+
+auto between(const std::string& name, int64_t min, int64_t max) {
+  return common::test::singleSubfieldFilter(name, exec::between(min, max));
+}
+
+auto gt(const std::string& name, double d) {
+  return common::test::singleSubfieldFilter(name, exec::greaterThanDouble(d));
+}
+
+auto lt(const std::string& name, double d) {
+  return common::test::singleSubfieldFilter(name, exec::lessThanDouble(d));
+}
 
 TEST_F(PlanTest, queryGraph) {
   TypePtr row1 = ROW({{"c1", ROW({{"c1a", INTEGER()}})}, {"c2", DOUBLE()}});
@@ -184,9 +207,9 @@ TEST_F(PlanTest, agg) {
 
   auto matcher = core::PlanMatcherBuilder()
                      .tableScan()
-                     .aggregation()
+                     .partialAggregation()
                      .localPartition()
-                     .aggregation()
+                     .finalAggregation()
                      .project()
                      .build();
 
@@ -217,15 +240,31 @@ TEST_F(PlanTest, filterToJoinEdge) {
   auto nationType = ROW({"n_regionkey"}, {BIGINT()});
   auto regionType = ROW({"r_regionkey"}, {BIGINT()});
 
+  const auto connectorId = exec::test::kHiveConnectorId;
+  const auto connector = connector::getConnector(connectorId);
+
   lp::PlanBuilder::Context context;
-  auto logicalPlan =
-      lp::PlanBuilder(context)
-          .tableScan(
-              exec::test::kHiveConnectorId, "nation", nationType->names())
-          .crossJoin(lp::PlanBuilder(context).tableScan(
-              exec::test::kHiveConnectorId, "region", regionType->names()))
-          .filter("n_regionkey + 1 = r_regionkey + 1")
-          .build();
+  auto logicalPlan = lp::PlanBuilder(context)
+                         .tableScan(connectorId, "nation", nationType->names())
+                         .crossJoin(lp::PlanBuilder(context).tableScan(
+                             connectorId, "region", regionType->names()))
+                         .filter("n_regionkey + 1 = r_regionkey + 1")
+                         .build();
+
+  {
+    auto plan = toSingleNodePlan(logicalPlan, connector);
+    auto matcher = core::PlanMatcherBuilder()
+                       .tableScan("region")
+                       .project()
+                       .hashJoin(core::PlanMatcherBuilder()
+                                     .tableScan("nation")
+                                     .project()
+                                     .build())
+                       .project()
+                       .build();
+
+    ASSERT_TRUE(matcher->match(plan));
+  }
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   auto referencePlan = exec::test::PlanBuilder(planNodeIdGenerator)
@@ -239,41 +278,77 @@ TEST_F(PlanTest, filterToJoinEdge) {
                            .filter("n_regionkey + 1 = r_regionkey + 1")
                            .planNode();
 
-  std::string plan;
-  checkSame(logicalPlan, referencePlan, &plan);
-  expectPlan(plan, "region t3*H  (nation t2  Build ) project 2 columns");
+  checkSame(logicalPlan, referencePlan);
 
+  // Add non-deterministic always-true filters to both branches of the join and
+  // after the join.
   logicalPlan =
       lp::PlanBuilder(context)
-          .tableScan(
-              exec::test::kHiveConnectorId, "nation", nationType->names())
+          .tableScan(connectorId, "nation", nationType->names())
           .filter("rand() < 2.0")
           .crossJoin(lp::PlanBuilder(context)
-                         .tableScan(
-                             exec::test::kHiveConnectorId,
-                             "region",
-                             regionType->names())
-                         .filter("rand() < 2.0"))
-          .filter("n_regionkey + 1 = r_regionkey + 1 and rand() < 2.0")
+                         .tableScan(connectorId, "region", regionType->names())
+                         .filter("rand() < 3.0"))
+          .filter("n_regionkey + 1 = r_regionkey + 1 and rand() < 4.0")
           .build();
 
-  checkSame(logicalPlan, referencePlan, &plan);
-  expectPlan(
-      plan,
-      "nation t5 filter 1 exprs  project 1 columns  project 1 columns *H  (region t8 filter 1 exprs  project 1 columns  project 1 columns   Build ) filter 1 exprs  project 2 columns  project 2 columns");
+  {
+    auto plan = toSingleNodePlan(logicalPlan, connector);
+    auto matcher =
+        core::PlanMatcherBuilder()
+            .tableScan("nation")
+            // TODO Why is this filter not pushed down into scan?
+            .filter("rand() < 2.0")
+            // TODO Fix this plan. There should be only one project node.
+            .project()
+            .project()
+            .project()
+            .hashJoin(core::PlanMatcherBuilder()
+                          .tableScan("region")
+                          .filter("rand() < 3.0")
+                          // TODO Fix this plan. There should be only one
+                          // project node.
+                          .project()
+                          .project()
+                          .project()
+                          .build())
+            .filter("rand() < 4.0")
+            // TODO Fix this plan. There should be only one project node.
+            .project()
+            .project()
+            .build();
+
+    ASSERT_TRUE(matcher->match(plan));
+  }
+
+  checkSame(logicalPlan, referencePlan);
 }
 
 TEST_F(PlanTest, filterImport) {
   auto ordersType = ROW({"o_custkey", "o_totalprice"}, {BIGINT(), DOUBLE()});
 
-  auto logicalPlan =
-      lp::PlanBuilder()
-          .tableScan(
-              exec::test::kHiveConnectorId, "orders", ordersType->names())
-          .aggregate({"o_custkey"}, {"sum(o_totalprice) as a0"})
-          .aggregate({"o_custkey"}, {"sum(a0) as a0"})
-          .filter("o_custkey < 100 and a0 > 200.0")
-          .build();
+  const auto connectorId = exec::test::kHiveConnectorId;
+  const auto connector = connector::getConnector(connectorId);
+
+  auto logicalPlan = lp::PlanBuilder()
+                         .tableScan(connectorId, "orders", ordersType->names())
+                         .aggregate({"o_custkey"}, {"sum(o_totalprice) as a0"})
+                         .filter("o_custkey < 100 and a0 > 200.0")
+                         .build();
+
+  {
+    auto plan = toSingleNodePlan(logicalPlan, connector);
+    auto matcher = core::PlanMatcherBuilder()
+                       .tableScan("orders")
+                       .partialAggregation()
+                       .localPartition()
+                       .finalAggregation()
+                       .filter("gt(\"dt1.a0\",200)")
+                       .project()
+                       .build();
+
+    ASSERT_TRUE(matcher->match(plan));
+  }
 
   auto referencePlan =
       exec::test::PlanBuilder()
@@ -282,11 +357,7 @@ TEST_F(PlanTest, filterImport) {
           .filter("o_custkey < 100 and a0 > 200.0")
           .planNode();
 
-  std::string plan;
-  checkSame(logicalPlan, referencePlan, &plan);
-  expectPlan(
-      plan,
-      "orders t3 PARTIAL agg FINAL agg project 2 columns  PARTIAL agg FINAL agg filter 1 exprs  project 2 columns");
+  checkSame(logicalPlan, referencePlan);
 }
 
 TEST_F(PlanTest, filterBreakup) {
@@ -334,17 +405,46 @@ TEST_F(PlanTest, filterBreakup) {
        {"p_container", VARCHAR()},
        {"p_size", INTEGER()}});
 
+  const auto connectorId = exec::test::kHiveConnectorId;
+  const auto connector = connector::getConnector(connectorId);
+
   lp::PlanBuilder::Context context;
   auto logicalPlan =
       lp::PlanBuilder(context)
-          .tableScan(
-              exec::test::kHiveConnectorId, "lineitem", lineitemType->names())
+          .tableScan(connectorId, "lineitem", lineitemType->names())
           .crossJoin(lp::PlanBuilder(context).tableScan(
-              exec::test::kHiveConnectorId, "part", partType->names()))
+              connectorId, "part", partType->names()))
           .filter(filterText)
           .project({"l_extendedprice * (1.0 - l_discount) as part_revenue"})
           .aggregate({}, {"sum(part_revenue)"})
           .build();
+
+  {
+    // Expect the per table filters to be extracted from the OR.
+    // TODO Verify remaining filters.
+    auto lineitemFilters =
+        common::test::SubfieldFiltersBuilder()
+            .add("l_shipinstruct", exec::equal("DELIVER IN PERSON"))
+            .add(
+                "l_shipmode",
+                exec::in(std::vector<std::string>{"AIR", "AIR REG"}))
+            .build();
+
+    auto plan = toSingleNodePlan(logicalPlan, connector);
+    auto matcher =
+        core::PlanMatcherBuilder()
+            .hiveScan("lineitem", std::move(lineitemFilters))
+            .hashJoin(core::PlanMatcherBuilder().hiveScan("part", {}).build())
+            .filter()
+            .project()
+            .partialAggregation()
+            .localPartition()
+            .finalAggregation()
+            .project()
+            .build();
+
+    ASSERT_TRUE(matcher->match(plan));
+  }
 
   auto referenceBuilder = std::make_unique<exec::test::TpchQueryBuilder>(
       dwio::common::FileFormat::PARQUET);
@@ -352,71 +452,165 @@ TEST_F(PlanTest, filterBreakup) {
 
   auto referencePlan = referenceBuilder->getQueryPlan(19).plan;
 
-  std::string planString;
-  std::string veloxString;
-  checkSame(logicalPlan, referencePlan, &planString, &veloxString);
-
-  // Expect the per table filters to be extracted from the OR.
-  expectRegexp(
-      veloxString,
-      "lineitem,.*range.*l_shipinstruct,.*l_shipmode.*remaining.*l_quantity.*l_quantity.*l_quantity");
-  expectRegexp(veloxString, "part.*p_size.*p_container");
+  checkSame(logicalPlan, referencePlan);
 }
 
-TEST_F(PlanTest, unions) {
+TEST_F(PlanTest, unionAll) {
   auto nationType =
       ROW({"n_nationkey", "n_regionkey", "n_name", "n_comment"},
           {BIGINT(), BIGINT(), VARCHAR(), VARCHAR()});
-  auto veloxPlan = exec::test::PlanBuilder(pool_.get())
-                       .tableScan("nation", nationType)
-                       .filter("n_nationkey < 11 or n_nationkey > 13")
-                       .project({"n_regionkey + 1 as rk"})
-                       .filter("rk in (1, 2, 4, 5)")
-                       .planNode();
+
+  const auto connectorId = exec::test::kHiveConnectorId;
+  const auto connector = connector::getConnector(connectorId);
+
+  const std::vector<std::string>& names = nationType->names();
 
   lp::PlanBuilder::Context ctx;
   auto t1 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "nation",
-                    {"n_nationkey", "n_regionkey", "n_name", "n_comment"})
+                .tableScan(connectorId, "nation", names)
                 .filter("n_nationkey < 11");
   auto t2 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "nation",
-                    {"n_nationkey", "n_regionkey", "n_name", "n_comment"})
+                .tableScan(connectorId, "nation", names)
                 .filter("n_nationkey > 13");
 
-  auto unionPlan = t1.unionAll(t2)
-                       .project({"n_regionkey + 1 as rk"})
-                       .filter("cast(rk as integer) in (1, 2, 4, 5)")
-                       .build();
+  auto logicalPlan = t1.unionAll(t2)
+                         .project({"n_regionkey + 1 as rk"})
+                         .filter("cast(rk as integer) in (1, 2, 4, 5)")
+                         .build();
+
+  {
+    // TODO Verify remaining filters.
+
+    auto plan = toSingleNodePlan(logicalPlan, connector);
+    auto matcher =
+        core::PlanMatcherBuilder()
+            .hiveScan("nation", lte("n_nationkey", 10))
+            .project()
+            .localPartition(core::PlanMatcherBuilder()
+                                .hiveScan("nation", gte("n_nationkey", 14))
+                                .project()
+                                .build())
+            .project()
+            .build();
+
+    ASSERT_TRUE(matcher->match(plan));
+  }
 
   // Skip distributed run. Problem with local exchange source with
   // multiple inputs.
   gflags::FlagSaver saver;
   FLAGS_num_workers = 1;
 
-  checkSame(unionPlan, veloxPlan);
+  auto referencePlan = exec::test::PlanBuilder(pool_.get())
+                           .tableScan("nation", nationType)
+                           .filter("n_nationkey < 11 or n_nationkey > 13")
+                           .project({"n_regionkey + 1 as rk"})
+                           .filter("rk in (1, 2, 4, 5)")
+                           .planNode();
+
+  checkSame(logicalPlan, referencePlan);
 }
 
 TEST_F(PlanTest, unionJoin) {
   auto partType = ROW({"p_partkey", "p_retailprice"}, {BIGINT(), DOUBLE()});
   auto partSuppType = ROW({"ps_partkey", "ps_availqty"}, {BIGINT(), INTEGER()});
+
+  const auto connectorId = exec::test::kHiveConnectorId;
+  const auto connector = connector::getConnector(connectorId);
+
+  lp::PlanBuilder::Context ctx;
+  auto ps1 =
+      lp::PlanBuilder(ctx)
+          .tableScan(connectorId, "partsupp", {"ps_partkey", "ps_availqty"})
+          .filter("ps_availqty < 1000::int")
+          .project({"ps_partkey"});
+
+  auto ps2 =
+      lp::PlanBuilder(ctx)
+          .tableScan(connectorId, "partsupp", {"ps_partkey", "ps_availqty"})
+          .filter("ps_availqty > 2000::int")
+          .project({"ps_partkey"});
+
+  auto ps3 =
+      lp::PlanBuilder(ctx)
+          .tableScan(connectorId, "partsupp", {"ps_partkey", "ps_availqty"})
+          .filter("ps_availqty between 1200::int and 1400::int")
+          .project({"ps_partkey"});
+
+  // The shape of the partsupp union is ps1 union all (ps2 union all ps3). We
+  // verify that a stack of multiple set ops works.
+  auto psu2 = ps2.unionAll(ps3);
+
+  auto p1 = lp::PlanBuilder(ctx)
+                .tableScan(connectorId, "part", {"p_partkey", "p_retailprice"})
+                .filter("p_retailprice < 1100.0");
+
+  auto p2 = lp::PlanBuilder(ctx)
+                .tableScan(connectorId, "part", {"p_partkey", "p_retailprice"})
+                .filter("p_retailprice > 1200.0");
+
+  auto logicalPlan =
+      ps1.unionAll(psu2)
+          .join(p1.unionAll(p2), "ps_partkey = p_partkey", lp::JoinType::kInner)
+          .aggregate({}, {"sum(1)"})
+          .build();
+
+  {
+    auto plan = toSingleNodePlan(logicalPlan, connector);
+    auto matcher =
+        core::PlanMatcherBuilder()
+            .hiveScan("partsupp", lte("ps_availqty", 999))
+            .project()
+            .localPartition(
+                core::PlanMatcherBuilder()
+                    .hiveScan("partsupp", gte("ps_availqty", 2001))
+                    .project()
+                    .localPartition(
+                        core::PlanMatcherBuilder()
+                            .hiveScan(
+                                "partsupp", between("ps_availqty", 1200, 1400))
+                            .project()
+                            .build())
+                    .build())
+            .hashJoin(
+                core::PlanMatcherBuilder()
+                    .hiveScan("part", lt("p_retailprice", 1100.0))
+                    .project()
+                    .localPartition(
+                        core::PlanMatcherBuilder()
+                            .hiveScan("part", gt("p_retailprice", 1200.0))
+                            .project()
+                            .build())
+                    .build(),
+                core::JoinType::kInner)
+            .project()
+            .partialAggregation()
+            .localPartition()
+            .finalAggregation()
+            .project()
+            .build();
+
+    ASSERT_TRUE(matcher->match(plan));
+  }
+
+  // Skip distributed run. Problem with local exchange source with
+  // multiple inputs.
+  gflags::FlagSaver saver;
+  FLAGS_num_workers = 1;
+
   auto idGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto veloxPlan =
+  auto referencePlan =
       exec::test::PlanBuilder(idGenerator)
           .tableScan("partsupp", partSuppType)
           .filter(
-              "ps_availqty < 1000::INTEGER or ps_availqty > 2000::INTEGER or ps_availqty between 1200::INTEGER and 1400::INTEGER")
+              "ps_availqty < 1000::int or ps_availqty > 2000::int "
+              "or ps_availqty between 1200::int and 1400::int")
           .hashJoin(
               {"ps_partkey"},
               {"p_partkey"},
               exec::test::PlanBuilder(idGenerator)
                   .tableScan("part", partType)
-                  .filter(
-                      "p_retailprice < 1100::DOUBLE or p_retailprice > 1200::DOUBLE")
+                  .filter("p_retailprice < 1100.0 or p_retailprice > 1200.0")
                   .planNode(),
               "",
               {"p_partkey"})
@@ -425,159 +619,145 @@ TEST_F(PlanTest, unionJoin) {
           .singleAggregation({}, {"sum(1)"})
           .planNode();
 
-  lp::PlanBuilder::Context ctx;
-  auto ps1 = lp::PlanBuilder(ctx)
-                 .tableScan(
-                     exec::test::kHiveConnectorId,
-                     "partsupp",
-                     {"ps_partkey", "ps_availqty"})
-                 .filter("ps_availqty < 1000::INTEGER")
-                 .project({"ps_partkey"});
-
-  auto ps2 = lp::PlanBuilder(ctx)
-                 .tableScan(
-                     exec::test::kHiveConnectorId,
-                     "partsupp",
-                     {"ps_partkey", "ps_availqty"})
-                 .filter("ps_availqty  > 2000::INTEGER")
-                 .project({"ps_partkey"});
-
-  auto ps3 =
-      lp::PlanBuilder(ctx)
-          .tableScan(
-              exec::test::kHiveConnectorId,
-              "partsupp",
-              {"ps_partkey", "ps_availqty"})
-          .filter("ps_availqty  between  1200::INTEGER and 1400::INTEGER")
-          .project({"ps_partkey"});
-
-  // The shape of the partsupp union is ps1 union all (ps2 union all
-  // ps3). We verify that a stack of multiple set ops works.
-  auto psu2 = ps2.unionAll(ps3);
-
-  auto p1 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "part",
-                    {"p_partkey", "p_retailprice"})
-                .filter("p_retailprice < 1100::DOUBLE");
-
-  auto p2 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "part",
-                    {"p_partkey", "p_retailprice"})
-                .filter("p_retailprice  > 1200::DOUBLE");
-
-  auto unionPlan =
-      ps1.unionAll(psu2)
-          .join(p1.unionAll(p2), "ps_partkey = p_partkey", lp::JoinType::kInner)
-          .aggregate({}, {"sum(1)"})
-          .build();
-
-  // Skip distributed run. Problem with local exchange source with
-  // multiple inputs.
-  gflags::FlagSaver saver;
-  FLAGS_num_workers = 1;
-
-  checkSame(unionPlan, veloxPlan);
+  checkSame(logicalPlan, referencePlan);
 }
 
 TEST_F(PlanTest, intersect) {
   auto nationType =
       ROW({"n_nationkey", "n_regionkey", "n_name", "n_comment"},
           {BIGINT(), BIGINT(), VARCHAR(), VARCHAR()});
-  auto veloxPlan = exec::test::PlanBuilder(pool_.get())
-                       .tableScan("nation", nationType)
-                       .filter("n_nationkey > 12 and n_nationkey < 21")
-                       .project({"n_regionkey + 1 as rk"})
-                       .filter("rk in (1, 2, 4, 5)")
-                       .planNode();
+
+  const auto connectorId = exec::test::kHiveConnectorId;
+  const auto connector = connector::getConnector(connectorId);
+
+  const std::vector<std::string>& names = nationType->names();
 
   lp::PlanBuilder::Context ctx;
   auto t1 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "nation",
-                    {"n_nationkey", "n_regionkey", "n_name", "n_comment"})
+                .tableScan(connectorId, "nation", names)
                 .filter("n_nationkey < 21")
                 .project({"n_nationkey", "n_regionkey"});
   auto t2 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "nation",
-                    {"n_nationkey", "n_regionkey", "n_name", "n_comment"})
+                .tableScan(connectorId, "nation", names)
                 .filter(" n_nationkey > 11 ")
                 .project({"n_nationkey", "n_regionkey"});
   auto t3 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "nation",
-                    {"n_nationkey", "n_regionkey", "n_name", "n_comment"})
+                .tableScan(connectorId, "nation", names)
                 .filter(" n_nationkey > 12 ")
                 .project({"n_nationkey", "n_regionkey"});
 
-  auto intersectPlan =
+  auto logicalPlan =
       lp::PlanBuilder(ctx)
           .setOperation(lp::SetOperation::kIntersect, {t1, t2, t3})
           .project({"n_regionkey + 1 as rk"})
           .filter("cast(rk as integer) in (1, 2, 4, 5)")
           .build();
 
-  std::string planString;
-  checkSame(intersectPlan, veloxPlan, &planString);
+  {
+    auto plan = toSingleNodePlan(logicalPlan, connector);
+    auto matcher =
+        core::PlanMatcherBuilder()
+            .hiveScan("nation", gte("n_nationkey", 13))
+            .project()
+            .hashJoin(
+                core::PlanMatcherBuilder()
+                    .hiveScan("nation", gte("n_nationkey", 12))
+                    .project()
+                    .hashJoin(
+                        core::PlanMatcherBuilder()
+                            .hiveScan("nation", lte("n_nationkey", 20))
+                            .project()
+                            .build(),
+                        core::JoinType::kRightSemiFilter)
+                    .build(),
+                core::JoinType::kRightSemiFilter)
+            .project()
+            .partialAggregation()
+            .localPartition()
+            .finalAggregation()
+            .project()
+            .project()
+            .build();
 
-  // Expect the in filter to be absorbed into the first scan. 2 existences.
-  expectPlan(
-      planString,
-      "nation t8 project 2 columns *H right exists (nation t6 project 2 columns *H right exists (nation t4 project 2 columns   Build )  Build ) PARTIAL agg FINAL agg project 2 columns  project 1 columns");
+    ASSERT_TRUE(matcher->match(plan));
+  }
+
+  auto referencePlan = exec::test::PlanBuilder(pool_.get())
+                           .tableScan("nation", nationType)
+                           .filter("n_nationkey > 12 and n_nationkey < 21")
+                           .project({"n_regionkey + 1 as rk"})
+                           .filter("rk in (1, 2, 4, 5)")
+                           .planNode();
+
+  checkSame(logicalPlan, referencePlan);
 }
 
 TEST_F(PlanTest, except) {
   auto nationType =
       ROW({"n_nationkey", "n_regionkey", "n_name", "n_comment"},
           {BIGINT(), BIGINT(), VARCHAR(), VARCHAR()});
-  auto veloxPlan = exec::test::PlanBuilder(pool_.get())
-                       .tableScan("nation", nationType)
-                       .filter("n_nationkey > 5 and n_nationkey <= 16")
-                       .project({"n_nationkey", "n_regionkey + 1 as rk"})
-                       .filter("rk in (1, 2, 4, 5)")
-                       .planNode();
+
+  const auto connectorId = exec::test::kHiveConnectorId;
+  const auto connector = connector::getConnector(connectorId);
+
+  const std::vector<std::string>& names = nationType->names();
 
   lp::PlanBuilder::Context ctx;
   auto t1 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "nation",
-                    {"n_nationkey", "n_regionkey", "n_name", "n_comment"})
+                .tableScan(connectorId, "nation", names)
                 .filter("n_nationkey < 21")
                 .project({"n_nationkey", "n_regionkey"});
   auto t2 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "nation",
-                    {"n_nationkey", "n_regionkey", "n_name", "n_comment"})
+                .tableScan(connectorId, "nation", names)
                 .filter(" n_nationkey > 16 ")
                 .project({"n_nationkey", "n_regionkey"});
   auto t3 = lp::PlanBuilder(ctx)
-                .tableScan(
-                    exec::test::kHiveConnectorId,
-                    "nation",
-                    {"n_nationkey", "n_regionkey", "n_name", "n_comment"})
+                .tableScan(connectorId, "nation", names)
                 .filter(" n_nationkey <= 5 ")
                 .project({"n_nationkey", "n_regionkey"});
 
-  auto exceptPlan = lp::PlanBuilder(ctx)
-                        .setOperation(lp::SetOperation::kExcept, {t1, t2, t3})
-                        .project({"n_nationkey", "n_regionkey + 1 as rk"})
-                        .filter("cast(rk as integer) in (1, 2, 4, 5)")
-                        .build();
+  auto logicalPlan = lp::PlanBuilder(ctx)
+                         .setOperation(lp::SetOperation::kExcept, {t1, t2, t3})
+                         .project({"n_nationkey", "n_regionkey + 1 as rk"})
+                         .filter("cast(rk as integer) in (1, 2, 4, 5)")
+                         .build();
 
-  std::string planString;
-  checkSame(exceptPlan, veloxPlan, &planString);
-  expectPlan(
-      planString,
-      "nation t4 project 2 columns *H not exists (nation t6 project 2 columns   Build )*H not exists (nation t8 project 2 columns   Build ) PARTIAL agg FINAL agg project 2 columns  project 2 columns");
+  {
+    auto plan = toSingleNodePlan(logicalPlan, connector);
+    auto matcher = core::PlanMatcherBuilder()
+                       .hiveScan("nation", lte("n_nationkey", 20))
+                       .project()
+                       .hashJoin(
+                           core::PlanMatcherBuilder()
+                               .hiveScan("nation", gte("n_nationkey", 17))
+                               .project()
+                               .build(),
+                           core::JoinType::kAnti)
+                       .hashJoin(
+                           core::PlanMatcherBuilder()
+                               .hiveScan("nation", lte("n_nationkey", 5))
+                               .project()
+                               .build(),
+                           core::JoinType::kAnti)
+                       .project()
+                       .partialAggregation()
+                       .localPartition()
+                       .finalAggregation()
+                       .project()
+                       .project()
+                       .build();
+
+    ASSERT_TRUE(matcher->match(plan));
+  }
+
+  auto referencePlan = exec::test::PlanBuilder(pool_.get())
+                           .tableScan("nation", nationType)
+                           .filter("n_nationkey > 5 and n_nationkey <= 16")
+                           .project({"n_nationkey", "n_regionkey + 1 as rk"})
+                           .filter("rk in (1, 2, 4, 5)")
+                           .planNode();
+
+  checkSame(logicalPlan, referencePlan);
 }
 
 } // namespace
