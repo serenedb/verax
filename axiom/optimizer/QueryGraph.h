@@ -17,6 +17,7 @@
 #pragma once
 
 #include "axiom/logical_plan/Expr.h"
+#include "axiom/logical_plan/LogicalPlanNode.h"
 #include "axiom/optimizer/Schema.h"
 #include "velox/core/PlanNode.h"
 
@@ -802,6 +803,34 @@ struct BaseTable : public PlanObject {
 };
 
 using BaseTableCP = const BaseTable*;
+
+struct ValuesTable : public PlanObject {
+  explicit ValuesTable(const logical_plan::ValuesNode& values)
+      : PlanObject{PlanType::kValuesTable}, values{values} {}
+
+  // Correlation name, distinguishes between uses of the same values node.
+  Name cname{nullptr};
+
+  const logical_plan::ValuesNode& values;
+
+  /// All columns referenced from this 'ValuesNode'.
+  ColumnVector columns;
+
+  // All joins where 'this' is an end point.
+  JoinEdgeVector joinedBy;
+
+  float cardinality() const {
+    return values.rows().size();
+  }
+
+  bool isTable() const override {
+    return true;
+  }
+
+  void addJoinedBy(JoinEdgeP join);
+
+  std::string toString() const override;
+};
 
 using TypeVector =
     std::vector<const velox::Type*, QGAllocator<const velox::Type*>>;

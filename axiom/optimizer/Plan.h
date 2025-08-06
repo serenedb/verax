@@ -790,7 +790,9 @@ class Optimization {
   // Converts a table scan into a BaseTable wen building a DerivedTable.
   PlanObjectP makeBaseTable(const core::TableScanNode* tableScan);
 
-  PlanObjectP makeBaseTable(const logical_plan::TableScanNode* tableScan);
+  PlanObjectP makeBaseTable(const logical_plan::TableScanNode& tableScan);
+
+  PlanObjectP makeValuesTable(const logical_plan::ValuesNode& values);
 
   // Decomposes complex type columns into parts projected out as top
   // level if subfield pushdown is on.
@@ -1272,6 +1274,11 @@ class Optimization {
       const UnionAll& unionAll,
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
+
+  core::PlanNodePtr makeValues(
+      const Values& values,
+      runner::ExecutableFragment& fragment,
+      std::vector<runner::ExecutableFragment>& stages);
 
   // Makes a tree of PlanNode for a tree of
   // RelationOp. 'fragment' is the fragment that 'op'

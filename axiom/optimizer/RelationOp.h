@@ -262,6 +262,26 @@ struct TableScan : public RelationOp {
   const ExprVector joinFilter;
 };
 
+/// Represents a values.
+struct Values : RelationOp {
+  Values(
+      Distribution distribution,
+      const ValuesTable& valuesTable,
+      ColumnVector columns)
+      : RelationOp{RelType::kValues, nullptr, std::move(distribution), std::move(columns)},
+        valuesTable{valuesTable} {
+    cost_.fanout = valuesTable.cardinality();
+  }
+
+  void setCost(const PlanState& input) override;
+
+  const QGstring& historyKey() const override;
+
+  std::string toString(bool recursive, bool detail) const override;
+
+  const ValuesTable& valuesTable;
+};
+
 /// Represents a repartition, i.e. query fragment boundary. The distribution of
 /// the output is '_distribution'.
 class Repartition : public RelationOp {

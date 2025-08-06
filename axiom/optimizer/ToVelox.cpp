@@ -1025,6 +1025,28 @@ velox::core::PlanNodePtr Optimization::makeUnionAll(
       localSources);
 }
 
+core::PlanNodePtr Optimization::makeValues(
+    const Values& values,
+    ExecutableFragment& fragment,
+    std::vector<ExecutableFragment>& stages) {
+  auto outputType = makeOutputType(values.columns());
+
+  const auto& literal_rows = values.valuesTable.values.rows();
+  std::vector<RowVectorPtr> rows;
+  rows.reserve(literal_rows.size());
+  for (const auto& literal : literal_rows) {
+    rows.push_back(std::static_pointer_cast<RowVector>(
+        variantToVector(outputType, literal, evaluator_.pool())));
+  }
+
+  auto valuesNode =
+      std::make_shared<core::ValuesNode>(nextId(), std::move(rows));
+
+  makePredictionAndHistory(valuesNode->id(), &values);
+
+  return valuesNode;
+}
+
 void Optimization::makePredictionAndHistory(
     const core::PlanNodeId& id,
     const RelationOp* op) {
@@ -1038,32 +1060,28 @@ core::PlanNodePtr Optimization::makeFragment(
     ExecutableFragment& fragment,
     std::vector<ExecutableFragment>& stages) {
   switch (op->relType()) {
-    case RelType::kProject: {
+    case RelType::kProject:
       return makeProject(*op->as<Project>(), fragment, stages);
-    }
-    case RelType::kFilter: {
+    case RelType::kFilter:
       return makeFilter(*op->as<Filter>(), fragment, stages);
-    }
-    case RelType::kAggregation: {
+    case RelType::kAggregation:
       return makeAggregation(*op->as<Aggregation>(), fragment, stages);
-    }
-    case RelType::kOrderBy: {
+    case RelType::kOrderBy:
       return makeOrderBy(*op->as<OrderBy>(), fragment, stages);
-    }
     case RelType::kRepartition: {
       std::shared_ptr<core::ExchangeNode> ignore;
       return makeRepartition(*op->as<Repartition>(), fragment, stages, ignore);
     }
-    case RelType::kTableScan: {
+    case RelType::kTableScan:
       return makeScan(*op->as<TableScan>(), fragment, stages);
-    }
-    case RelType::kJoin: {
+    case RelType::kJoin:
       return makeJoin(*op->as<Join>(), fragment, stages);
-    }
     case RelType::kHashBuild:
       return makeFragment(op->input(), fragment, stages);
     case RelType::kUnionAll:
       return makeUnionAll(*op->as<UnionAll>(), fragment, stages);
+    case RelType::kValues:
+      return makeValues(*op->as<Values>(), fragment, stages);
     default:
       VELOX_FAIL(
           "Unsupported RelationOp {}", static_cast<int32_t>(op->relType()));

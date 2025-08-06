@@ -38,7 +38,8 @@ enum class PlanType {
   kOrderBy,
   kLimit,
   kField,
-  kLambda
+  kLambda,
+  kValuesTable,
 };
 
 /// True if 'type' is an expression with a value.

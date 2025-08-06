@@ -288,24 +288,29 @@ IndexInfo joinCardinality(PlanObjectCP table, CPSpan<Column> keys) {
     auto schemaTable = table->as<BaseTable>()->schemaTable;
     return schemaTable->indexByColumns(keys);
   }
-  VELOX_CHECK(table->type() == PlanType::kDerivedTable);
-  auto dt = table->as<DerivedTable>();
-  auto distribution = dt->distribution;
-  assert(distribution);
+
   IndexInfo result;
-  result.scanCardinality = distribution->cardinality;
-  const ExprVector* groupingKeys = nullptr;
-  if (dt->aggregation) {
-    groupingKeys = &dt->aggregation->aggregation->grouping;
+  auto computeCardinalities = [&](float scanCardinality) {
+    result.scanCardinality = scanCardinality;
+    result.joinCardinality = scanCardinality;
+    for (size_t i = 0; i < keys.size(); ++i) {
+      result.joinCardinality =
+          combine(result.joinCardinality, i, keys[i]->value().cardinality);
+    }
+  };
+
+  if (table->type() == PlanType::kValuesTable) {
+    const auto* valuesTable = table->as<ValuesTable>();
+    computeCardinalities(valuesTable->cardinality());
+    return result;
   }
-  result.joinCardinality = result.scanCardinality;
-  for (auto i = 0; i < keys.size(); ++i) {
-    result.joinCardinality =
-        combine(result.joinCardinality, i, keys[i]->value().cardinality);
-  }
-  if (groupingKeys && keys.size() >= groupingKeys->size()) {
-    result.unique = true;
-  }
+  VELOX_CHECK_EQ(table->type(), PlanType::kDerivedTable);
+  const auto* dt = table->as<DerivedTable>();
+  const auto* distribution = dt->distribution;
+  VELOX_CHECK_NOT_NULL(distribution);
+  computeCardinalities(distribution->cardinality);
+  result.unique = dt->aggregation &&
+      keys.size() >= dt->aggregation->aggregation->grouping.size();
   return result;
 }
 
