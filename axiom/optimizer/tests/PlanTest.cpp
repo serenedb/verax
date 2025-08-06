@@ -22,6 +22,7 @@
 #include "axiom/optimizer/VeloxHistory.h"
 #include "axiom/optimizer/connectors/tests/TestConnector.h"
 #include "axiom/optimizer/tests/ParquetTpchTest.h"
+#include "axiom/optimizer/tests/PlanMatcher.h"
 #include "axiom/optimizer/tests/QueryTestBase.h"
 #include "velox/exec/tests/utils/TpchQueryBuilder.h"
 
@@ -104,7 +105,7 @@ class PlanTest : public virtual test::ParquetTpchTest,
     }
   }
 
-  runner::MultiFragmentPlanPtr toSingleNodePlan(
+  core::PlanNodePtr toSingleNodePlan(
       const lp::LogicalPlanNodePtr& logicalPlan) {
     gflags::FlagSaver saver;
     FLAGS_num_workers = 1;
@@ -115,7 +116,7 @@ class PlanTest : public virtual test::ParquetTpchTest,
     auto plan = planVelox(logicalPlan).plan;
 
     EXPECT_EQ(1, plan->fragments().size());
-    return plan;
+    return plan->fragments().at(0).fragment.planNode;
   }
 
   std::unique_ptr<HashStringAllocator> allocator_;
@@ -181,20 +182,15 @@ TEST_F(PlanTest, agg) {
 
   auto plan = toSingleNodePlan(logicalPlan);
 
-  std::vector<std::string> lines;
-  folly::split("\n", plan->toString(false), lines);
+  auto matcher = core::PlanMatcherBuilder()
+                     .tableScan()
+                     .aggregation()
+                     .localPartition()
+                     .aggregation()
+                     .project()
+                     .build();
 
-  EXPECT_THAT(
-      lines,
-      testing::ElementsAre(
-          testing::StartsWith("Fragment 0"),
-          testing::Eq("-- Project[4]"),
-          testing::Eq("  -- Aggregation[3]"),
-          testing::Eq("    -- LocalPartition[2]"),
-          testing::Eq("      -- Aggregation[1]"),
-          testing::Eq("        -- TableScan[0]"),
-          testing::Eq(""),
-          testing::Eq("")));
+  ASSERT_TRUE(matcher->match(plan));
 }
 
 // Verify that optimizer can handle connectors that do not support filter
@@ -211,18 +207,10 @@ TEST_F(PlanTest, rejectedFilters) {
 
   auto plan = toSingleNodePlan(logicalPlan);
 
-  std::vector<std::string> lines;
-  folly::split("\n", plan->toString(false), lines);
+  auto matcher =
+      core::PlanMatcherBuilder().tableScan().filter().project().build();
 
-  EXPECT_THAT(
-      lines,
-      testing::ElementsAre(
-          testing::StartsWith("Fragment 0"),
-          testing::StartsWith("-- Project"),
-          testing::StartsWith("  -- Filter"),
-          testing::StartsWith("    -- TableScan"),
-          testing::Eq(""),
-          testing::Eq("")));
+  ASSERT_TRUE(matcher->match(plan));
 }
 
 TEST_F(PlanTest, filterToJoinEdge) {
