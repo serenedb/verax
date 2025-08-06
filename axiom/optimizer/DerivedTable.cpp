@@ -245,6 +245,8 @@ void DerivedTable::linkTablesToJoins() {
     tables.forEachMutable([&](PlanObjectP table) {
       if (table->type() == PlanType::kTable) {
         table->as<BaseTable>()->addJoinedBy(join);
+      } else if (table->type() == PlanType::kValuesTable) {
+        table->as<ValuesTable>()->addJoinedBy(join);
       } else {
         VELOX_CHECK(table->type() == PlanType::kDerivedTable);
         table->as<DerivedTable>()->addJoinedBy(join);
@@ -768,10 +770,8 @@ void DerivedTable::distributeConjuncts() {
             changedDts.push_back(childDt);
           }
         }
-        conjuncts.erase(conjuncts.begin() + i);
-        --numCanonicalConjuncts;
-        --i;
-        continue;
+      } else if (tables[0]->type() == PlanType::kValuesTable) {
+        continue; // ValuesTable does not have filter push-down.
       } else {
         VELOX_CHECK(tables[0]->type() == PlanType::kTable);
         tables[0]->as<BaseTable>()->addFilter(conjuncts[i]);

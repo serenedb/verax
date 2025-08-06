@@ -165,6 +165,17 @@ std::string BaseTable::toString() const {
   return out.str();
 }
 
+void ValuesTable::addJoinedBy(JoinEdgeP join) {
+  pushBackUnique(joinedBy, join);
+}
+
+std::string ValuesTable::toString() const {
+  std::stringstream out;
+  out << "{" << PlanObject::toString();
+  out << values.id() << " " << cname << "}";
+  return out.str();
+}
+
 const JoinSide JoinEdge::sideOf(PlanObjectCP side, bool other) const {
   if ((side == rightTable_ && !other) || (side == leftTable_ && other)) {
     return {

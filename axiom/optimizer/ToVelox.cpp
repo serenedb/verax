@@ -1138,6 +1138,27 @@ velox::core::PlanNodePtr Optimization::makeUnionAll(
       localSources);
 }
 
+core::PlanNodePtr Optimization::makeValues(const Values& values) {
+  // TODO we need to remove unnecessary columns from the output type vectors
+  // auto neededOutputType = makeOutputType(values.columns());
+  const auto& fullOutputType = values.valuesTable.values.outputType();
+
+  const auto& literal_rows = values.valuesTable.values.rows();
+  std::vector<RowVectorPtr> rows;
+  rows.reserve(literal_rows.size());
+  for (const auto& literal : literal_rows) {
+    rows.push_back(std::static_pointer_cast<RowVector>(
+        variantToVector(fullOutputType, literal, evaluator_.pool())));
+  }
+
+  auto valuesNode =
+      std::make_shared<core::ValuesNode>(nextId(), std::move(rows));
+
+  makePredictionAndHistory(valuesNode->id(), &values);
+
+  return valuesNode;
+}
+
 void Optimization::makePredictionAndHistory(
     const core::PlanNodeId& id,
     const RelationOp* op) {
@@ -1173,6 +1194,8 @@ core::PlanNodePtr Optimization::makeFragment(
       return makeFragment(op->input(), fragment, stages);
     case RelType::kUnionAll:
       return makeUnionAll(*op->as<UnionAll>(), fragment, stages);
+    case RelType::kValues:
+      return makeValues(*op->as<Values>());
     default:
       VELOX_FAIL(
           "Unsupported RelationOp {}", static_cast<int32_t>(op->relType()));

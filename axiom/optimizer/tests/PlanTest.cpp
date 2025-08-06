@@ -27,6 +27,7 @@
 #include "velox/exec/tests/utils/TpchQueryBuilder.h"
 #include "velox/expression/ExprToSubfieldFilter.h"
 #include "velox/type/tests/SubfieldFiltersBuilder.h"
+#include "velox/vector/VariantToVector.h"
 
 DEFINE_int32(num_repeats, 1, "Number of repeats for optimization timing");
 
@@ -831,6 +832,56 @@ TEST_F(PlanTest, except) {
   checkSame(logicalPlan, referencePlan);
 }
 
+TEST_F(PlanTest, values) {
+  auto nationType =
+      ROW({"n_nationkey", "n_regionkey", "n_name", "n_comment"},
+          {BIGINT(), BIGINT(), VARCHAR(), VARCHAR()});
+
+  const std::vector<std::string>& names = nationType->names();
+
+  std::vector<Variant> variant_values{
+      Variant::row({int64_t{1}, int64_t{10}, "nation1", "comment1"}),
+      Variant::row({int64_t{2}, int64_t{20}, "nation2", "comment2"}),
+      Variant::row({int64_t{3}, int64_t{30}, "nation3", "comment3"}),
+  };
+
+  lp::PlanBuilder::Context ctx;
+  auto t1 = lp::PlanBuilder(ctx)
+                .values(nationType, variant_values)
+                .filter("n_nationkey < 21")
+                .project({"n_nationkey", "n_regionkey"});
+  auto t2 = lp::PlanBuilder(ctx)
+                .values(nationType, variant_values)
+                .filter("n_nationkey > 16")
+                .project({"n_nationkey", "n_regionkey"});
+  auto t3 = lp::PlanBuilder(ctx)
+                .values(nationType, variant_values)
+                .filter("n_nationkey <= 5")
+                .project({"n_nationkey", "n_regionkey"});
+
+  auto logicalPlan = lp::PlanBuilder(ctx)
+                         .setOperation(lp::SetOperation::kExcept, {t1, t2, t3})
+                         .project({"n_nationkey", "n_regionkey + 1 as rk"})
+                         .filter("cast(rk as integer) in (1, 2, 4, 5)")
+                         .build();
+
+  std::vector<RowVectorPtr> vector_values;
+  vector_values.reserve(variant_values.size());
+  for (const auto& literal : variant_values) {
+    vector_values.push_back(std::dynamic_pointer_cast<RowVector>(
+        variantToVector(nationType, literal, pool_.get())));
+    EXPECT_TRUE(vector_values.back());
+  }
+
+  auto referencePlan = exec::test::PlanBuilder(pool_.get())
+                           .values(std::move(vector_values))
+                           .filter("n_nationkey > 5 and n_nationkey <= 16")
+                           .project({"n_nationkey", "n_regionkey + 1 as rk"})
+                           .filter("rk in (1, 2, 4, 5)")
+                           .planNode();
+
+  checkSame(logicalPlan, referencePlan);
+}
 } // namespace
 } // namespace facebook::velox::optimizer
 

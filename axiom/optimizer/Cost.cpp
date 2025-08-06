@@ -98,7 +98,6 @@ float orderPrefixDistance(
 
 void TableScan::setCost(const PlanState& input) {
   RelationOp::setCost(input);
-  float size = byteSize(columns_);
   if (!keys.empty()) {
     float lookupRange(index->distribution().cardinality);
     float orderSelectivity = orderPrefixDistance(this->input(), index, keys);
@@ -116,10 +115,20 @@ void TableScan::setCost(const PlanState& input) {
       cost_.unitCost = batchCost / batchSize;
     }
     return;
-  } else {
-    cost_.fanout =
-        index->distribution().cardinality * baseTable->filterSelectivity;
   }
+  cost_.fanout =
+      index->distribution().cardinality * baseTable->filterSelectivity;
+  auto size = byteSize(columns_);
+  auto numColumns = columns_.size();
+  auto rowCost = numColumns * Costs::kColumnRowCost +
+      std::max<float>(0, size - 8 * numColumns) * Costs::kColumnByteCost;
+  cost_.unitCost += cost_.fanout * rowCost;
+}
+
+void Values::setCost(const PlanState& input) {
+  RelationOp::setCost(input);
+  cost_.fanout = valuesTable.cardinality();
+  auto size = byteSize(columns_);
   auto numColumns = columns_.size();
   auto rowCost = numColumns * Costs::kColumnRowCost +
       std::max<float>(0, size - 8 * numColumns) * Costs::kColumnByteCost;
