@@ -22,16 +22,16 @@
 #include "axiom/optimizer/tests/utils/DfFunctions.h"
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
-#include "velox/parse/Expressions.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
 
 DEFINE_string(subfield_data_path, "", "Data directory for subfield test data");
 
-using namespace facebook::velox;
-using namespace facebook::velox::optimizer;
 using namespace facebook::velox::optimizer::test;
 using namespace facebook::velox::exec::test;
+
 namespace lp = facebook::velox::logical_plan;
+
+namespace facebook::velox::optimizer {
 
 class LogicalSubfieldTest : public QueryTestBase,
                             public testing::WithParamInterface<int32_t> {
@@ -73,12 +73,8 @@ class LogicalSubfieldTest : public QueryTestBase,
   }
 
   void declareGenies() {
-    TypePtr genieType = makeGenieType();
-    std::vector<TypePtr> genieArgs = {
-        genieType->childAt(0),
-        genieType->childAt(1),
-        genieType->childAt(2),
-        genieType->childAt(3)};
+    auto genieType = makeGenieType();
+    std::vector<TypePtr> genieArgs = genieType->children();
     planner().registerScalarFunction("genie", genieArgs, genieType);
     planner().registerScalarFunction("exploding_genie", genieArgs, genieType);
     registerGenieUdfs();
@@ -86,12 +82,14 @@ class LogicalSubfieldTest : public QueryTestBase,
     auto metadata = std::make_unique<FunctionMetadata>();
     metadata->fieldIndexForArg = {1, 2, 3};
     metadata->argOrdinal = {1, 2, 3};
-    auto* instance = FunctionRegistry::instance();
-    auto explodingMetadata = std::make_unique<FunctionMetadata>(*metadata);
-    instance->registerFunction("genie", std::move(metadata));
 
+    auto* registry = FunctionRegistry::instance();
+    registry->registerFunction(
+        "genie", std::make_unique<FunctionMetadata>(*metadata));
+
+    auto explodingMetadata = std::make_unique<FunctionMetadata>(*metadata);
     explodingMetadata->logicalExplode = logicalExplodeGenie;
-    instance->registerFunction("exploding_genie", std::move(explodingMetadata));
+    registry->registerFunction("exploding_genie", std::move(explodingMetadata));
   }
 
   static std::unordered_map<PathCP, lp::ExprPtr> logicalExplodeGenie(
@@ -162,27 +160,28 @@ class LogicalSubfieldTest : public QueryTestBase,
       const std::vector<RowVectorPtr>& vectors,
       int32_t key) {
     std::vector<RowVectorPtr> result;
-    facebook::velox::test::VectorMaker vectorMaker(pool_.get());
+    velox::test::VectorMaker vectorMaker(pool());
 
     for (auto& row : vectors) {
-      auto* idList = row->childAt(3)->as<MapVector>();
-      auto* keys = idList->mapKeys()->as<FlatVector<int32_t>>();
-      auto* values = idList->mapValues()->as<ArrayVector>();
-      auto idsShared =
-          BaseVector::create(values->type(), row->size(), values->pool());
-      auto* ids = idsShared->as<ArrayVector>();
-      for (auto i = 0; i < idList->size(); ++i) {
+      const auto* map = row->childAt("id_list_features")->as<MapVector>();
+      const auto* keys = map->mapKeys()->as<FlatVector<int32_t>>();
+      const auto* values = map->mapValues()->as<ArrayVector>();
+
+      auto ids =
+          BaseVector::create<ArrayVector>(ARRAY(BIGINT()), row->size(), pool());
+      auto* elements = ids->elements()->as<FlatVector<int64_t>>();
+      for (auto i = 0; i < row->size(); ++i) {
         bool found = false;
-        for (auto k = idList->offsetAt(i);
-             k < idList->offsetAt(i) + idList->sizeAt(i);
-             ++k) {
+        const auto mapOffset = map->offsetAt(i);
+        const auto mapSize = map->sizeAt(i);
+        for (auto k = mapOffset; k < mapOffset + mapSize; ++k) {
           if (keys->valueAt(k) == key) {
             ids->copy(values, i, k, 1);
-            auto* elt = ids->elements()->as<FlatVector<int64_t>>();
-            for (auto e = ids->offsetAt(i);
-                 e < ids->offsetAt(i) + ids->sizeAt(i);
-                 ++e) {
-              elt->set(e, elt->valueAt(e) + 1);
+
+            const auto arrayOffset = ids->offsetAt(i);
+            const auto arraySize = ids->sizeAt(i);
+            for (auto e = arrayOffset; e < arrayOffset + arraySize; ++e) {
+              elements->set(e, elements->valueAt(e) + 1);
             }
             found = true;
             break;
@@ -192,17 +191,9 @@ class LogicalSubfieldTest : public QueryTestBase,
           ids->setNull(i, true);
         }
       }
-      result.push_back(vectorMaker.rowVector({idsShared}));
+      result.push_back(vectorMaker.rowVector({ids}));
     }
 
-    return result;
-  }
-
-  std::vector<std::string> fieldNames(const RowTypePtr& type) {
-    std::vector<std::string> result;
-    for (auto i = 0; i < type->size(); ++i) {
-      result.push_back(type->nameOf(i));
-    }
     return result;
   }
 
@@ -232,21 +223,27 @@ class LogicalSubfieldTest : public QueryTestBase,
 
     opts.rng.seed(1);
     makeLogicalExprs(opts, names, exprs);
+
     lp::PlanBuilder::Context ctx;
-    auto builder = lp::PlanBuilder(ctx).tableScan(
-        kHiveConnectorId, "features", fieldNames(rowType));
-    lp::LogicalPlanNodePtr logicalPlan = std::make_shared<lp::ProjectNode>(
+    auto logicalPlan = std::make_shared<lp::ProjectNode>(
         ctx.planNodeIdGenerator->next(),
-        builder.build(),
+        lp::PlanBuilder(ctx)
+            .tableScan(kHiveConnectorId, "features", rowType->names())
+            .build(),
         std::move(names),
         std::move(exprs));
 
     optimizerOptions_.parallelProjectWidth = 8;
     auto fragmentedPlan = planVelox(logicalPlan);
-    auto plan = veloxString(fragmentedPlan.plan);
 
-    expectRegexp(plan, "ParallelProject");
-    std::cout << plan;
+    auto* parallelProject = core::PlanNode::findFirstNode(
+        extractPlanNode(fragmentedPlan).get(), [](const core::PlanNode* node) {
+          return dynamic_cast<const core::ParallelProjectNode*>(node) !=
+              nullptr;
+        });
+
+    ASSERT_TRUE(parallelProject != nullptr);
+
     assertSame(veloxPlan, fragmentedPlan);
   }
 
@@ -286,6 +283,64 @@ class LogicalSubfieldTest : public QueryTestBase,
     // 10030 is not referenced, expect not in plan.
     expectRegexp(exe, "10030", false);
   }
+
+  void createTable(
+      const std::string& name,
+      const std ::vector<RowVectorPtr>& vectors,
+      const std::shared_ptr<dwrf::Config>& config =
+          std::make_shared<dwrf::Config>()) {
+    auto fs = filesystems::getFileSystem(testDataPath_, {});
+    fs->mkdir(fmt::format("{}/{}", testDataPath_, name));
+
+    const auto filePath =
+        fmt::format("{}/{}/{}.dwrf", testDataPath_, name, name);
+    writeToFile(filePath, vectors, config);
+    tablesCreated();
+  }
+
+  static void verifyRequiredSubfields(
+      const core::PlanNodePtr& plan,
+      const std::unordered_map<std::string, std::vector<std::string>>&
+          expectedSubfields) {
+    auto* scanNode = core::PlanNode::findFirstNode(
+        plan.get(), [](const core::PlanNode* node) {
+          auto scan = dynamic_cast<const core::TableScanNode*>(node);
+          return scan != nullptr;
+        });
+
+    ASSERT_TRUE(scanNode != nullptr);
+
+    SCOPED_TRACE(scanNode->toString(true, true));
+
+    const auto& assignments =
+        dynamic_cast<const core::TableScanNode*>(scanNode)->assignments();
+    ASSERT_EQ(assignments.size(), expectedSubfields.size());
+
+    for (const auto& [_, handle] : assignments) {
+      auto hiveHandle =
+          dynamic_cast<const connector::hive::HiveColumnHandle*>(handle.get());
+      ASSERT_TRUE(hiveHandle != nullptr);
+
+      const auto& name = hiveHandle->name();
+      const auto& subfields = hiveHandle->requiredSubfields();
+
+      auto it = expectedSubfields.find(name);
+      ASSERT_TRUE(it != expectedSubfields.end())
+          << "Unexpected column: " << name;
+      const auto& expected = it->second;
+
+      ASSERT_EQ(subfields.size(), expected.size()) << hiveHandle->toString();
+
+      for (auto i = 0; i < subfields.size(); ++i) {
+        EXPECT_EQ(
+            subfields[i].toString(), fmt::format("{}{}", name, expected[i]));
+      }
+    }
+  }
+
+  core::PlanNodePtr extractPlanNode(const PlanAndStats& plan) {
+    return plan.plan->fragments().at(0).fragment.planNode;
+  }
 };
 
 TEST_P(LogicalSubfieldTest, structs) {
@@ -294,41 +349,50 @@ TEST_P(LogicalSubfieldTest, structs) {
           {BIGINT(), ROW({"s2s1"}, {BIGINT()}), ARRAY(BIGINT())});
   auto rowType = ROW({"s", "i"}, {structType, BIGINT()});
   auto vectors = makeVectors(rowType, 10, 10);
-  auto fs = filesystems::getFileSystem(testDataPath_, {});
-  fs->mkdir(testDataPath_ + "/structs");
-  auto filePath = testDataPath_ + "/structs/structs.dwrf";
-  writeToFile(filePath, vectors);
-  tablesCreated();
+  createTable("structs", vectors);
 
-  auto builder =
+  auto logicalPlan =
       lp::PlanBuilder()
-          .tableScan(kHiveConnectorId, "structs", fieldNames(rowType))
-          .project({"s.s1 as a", "s.s3[0] as arr0"});
+          .tableScan(kHiveConnectorId, "structs", rowType->names())
+          .project({"s.s1", "s.s3[1]"})
+          .build();
 
-  auto plan = veloxString(planVelox(builder.build()).plan);
-  expectRegexp(plan, "s.*Subfields.*s.s3\\[0\\]");
-  expectRegexp(plan, "s.*Subfields.*s.s1");
+  auto fragmentedPlan = planVelox(logicalPlan);
+
+  // t2.s = HiveColumnHandle [... requiredSubfields: [ s.s1 s.s3[0] ]]
+  verifyRequiredSubfields(
+      extractPlanNode(fragmentedPlan), {{"s", {".s1", ".s3[1]"}}});
+
+  auto referencePlan = PlanBuilder()
+                           .tableScan("structs", rowType)
+                           .project({"s.s1", "s.s3[1]"})
+                           .planNode();
+
+  assertSame(referencePlan, fragmentedPlan);
 }
 
 TEST_P(LogicalSubfieldTest, maps) {
   FeatureOptions opts;
   opts.rng.seed(1);
   auto vectors = makeFeatures(1, 100, opts, pool_.get());
-  auto rowType = std::dynamic_pointer_cast<const RowType>(vectors[0]->type());
-  auto fields = fieldNames(rowType);
-  auto fs = filesystems::getFileSystem(testDataPath_, {});
-  fs->mkdir(testDataPath_ + "/features");
-  auto filePath = testDataPath_ + "/features/features.dwrf";
+
+  const auto rowType = vectors[0]->rowType();
+  const auto fields = rowType->names();
+
   auto config = std::make_shared<dwrf::Config>();
   config->set(dwrf::Config::FLATTEN_MAP, true);
   config->set<const std::vector<uint32_t>>(
       dwrf::Config::MAP_FLAT_COLS, {2, 3, 4});
 
-  writeToFile(filePath, vectors, config);
-  tablesCreated();
-  std::string plan;
+  createTable("features", vectors, config);
+
+  auto subfield = [&](const std::string& first, const std::string& rest = "") {
+    return GetParam() == 3 ? fmt::format(".{}{}", first, rest)
+                           : fmt::format("[{}]{}", first, rest);
+  };
 
   testMakeRowFromMap();
+
   {
     lp::PlanBuilder::Context ctx;
     auto builder =
@@ -339,103 +403,129 @@ TEST_P(LogicalSubfieldTest, maps) {
                 lp::PlanBuilder(ctx)
                     .tableScan(kHiveConnectorId, "features", fields)
                     .filter(
-                        "uid % 2 = 1 and cast(float_features[10300::INTEGER] as integer) % 2::INTEGER = 0::INTEGER")
+                        "uid % 2 = 1 and cast(float_features[10300::int] as integer) % 2::int = 0::int")
                     .project({"uid as opt_uid", "float_features as opt_ff"}),
                 "uid = opt_uid",
                 lp::JoinType::kLeft)
             .project(
                 {"uid",
                  "opt_uid",
-                 "ff[10100::INTEGER] as f10",
-                 "ff[10200::INTEGER] as f20",
-                 "opt_ff[10100::INTEGER] as o10",
-                 "opt_ff[10200::INTEGER] as o20"});
+                 "ff[10100::int] as f10",
+                 "ff[10200::int] as f20",
+                 "opt_ff[10100::int] as o10",
+                 "opt_ff[10200::int] as o20"});
 
-    plan = veloxString(planVelox(builder.build()).plan);
-    std::cout << plan << std::endl;
+    auto plan = veloxString(planVelox(builder.build()).plan);
+    // TODO Add verification.
   }
   {
-    auto builder =
+    auto logicalPlan =
         lp::PlanBuilder()
             .tableScan(kHiveConnectorId, "features", fields)
             .project(
-                {"float_features[10100::INTEGER] as f1",
-                 "float_features[10200::INTEGER] as f2",
-                 "id_score_list_features[200800::INTEGER][100000::BIGINT]"});
-    plan = veloxString(planVelox(builder.build()).plan);
-    expectRegexp(plan, "float_features.*Subfields.*float_features.10100.");
-    expectRegexp(plan, "float_features.*Subfields.*float_features.10200.");
-    expectRegexp(
+                {"float_features[10100::int] as f1",
+                 "float_features[10200::int] as f2",
+                 "id_score_list_features[200800::int][100000::BIGINT]"})
+            .build();
+
+    auto plan = extractPlanNode(planVelox(logicalPlan));
+    verifyRequiredSubfields(
         plan,
-        "id_score_list_features.*Subfields.* id_score_list_features.200800.*\\[100000\\]");
-    expectRegexp(plan, "ubfield.*id_list", false);
+        {
+            {"float_features", {subfield("10100"), subfield("10200")}},
+            {"id_score_list_features", {subfield("200800", "[100000]")}},
+        });
   }
   {
-    auto builder = lp::PlanBuilder()
-                       .tableScan(kHiveConnectorId, "features", fields)
-                       .project(
-                           {"float_features[10000::INTEGER] as ff",
-                            "id_score_list_features[200800::INTEGER] as sc1",
-                            "id_list_features as idlf"})
-                       .project({"sc1[1::BIGINT] + 1::REAL as score"});
-    plan = veloxString(planVelox(builder.build()).plan);
-    expectRegexp(
+    auto logicalPlan = lp::PlanBuilder()
+                           .tableScan(kHiveConnectorId, "features", fields)
+                           .project(
+                               {"float_features[10000::int] as ff",
+                                "id_score_list_features[200800::int] as sc1",
+                                "id_list_features as idlf"})
+                           .project({"sc1[1::BIGINT] + 1::REAL as score"})
+                           .build();
+
+    auto plan = extractPlanNode(planVelox(logicalPlan));
+    verifyRequiredSubfields(
         plan,
-        "id_score_list_features.*Subfields:.*\\[ id_score_list_features.200800.*\\[1\\]");
-    expectRegexp(plan, "ubfield.*id_list", false);
-    expectRegexp(plan, "ubfield.*float_f", false);
+        {
+            {"id_score_list_features", {subfield("200800", "[1]")}},
+        });
   }
   {
-    auto builder = lp::PlanBuilder()
-                       .tableScan(kHiveConnectorId, "features", fields)
-                       .project(
-                           {"float_features[10100::INTEGER] as ff",
-                            "id_score_list_features[200800::INTEGER] as sc1",
-                            "id_list_features as idlf",
-                            "uid"})
-                       .project(
-                           {"sc1[1::BIGINT] + 1::REAL as score",
-                            "idlf[cast(uid % 100 as INTEGER)] as any"});
-    plan = veloxString(planVelox(builder.build()).plan);
-    expectRegexp(
-        plan, "id_list_features.*Subfields:.* id_list_features\\[\\*\\]");
+    auto logicalPlan = lp::PlanBuilder()
+                           .tableScan(kHiveConnectorId, "features", fields)
+                           .project(
+                               {"float_features[10100::int] as ff",
+                                "id_score_list_features[200800::int] as sc1",
+                                "id_list_features as idlf",
+                                "uid"})
+                           .project(
+                               {"sc1[1::BIGINT] + 1::REAL as score",
+                                "idlf[cast(uid % 100 as INTEGER)] as any"})
+                           .build();
+
+    auto plan = extractPlanNode(planVelox(logicalPlan));
+    verifyRequiredSubfields(
+        plan,
+        {
+            {"uid", {}},
+            {"id_score_list_features", {subfield("200800", "[1]")}},
+            {"id_list_features", {"[*]"}},
+        });
   }
+
   declareGenies();
 
   // Selected fields of genie are accessed. The uid and idslf args are not
   // accessed and should not be in the table scan.
   {
-    auto builder =
+    auto logicalPlan =
         lp::PlanBuilder()
             .tableScan(kHiveConnectorId, "features", fields)
             .project(
                 {"genie(uid, float_features, id_list_features, id_score_list_features) as g"})
             // Access some fields of the genie by name, others by index.
             .project(
-                {"g.ff[10200::INTEGER] as f2",
-                 "g[2][10100::INTEGER] as f11",
-                 "g[2][10200::INTEGER] + 22::REAL  as f2b",
-                 "g.idlf[201600::INTEGER] as idl100"});
+                {"g.ff[10200::int] as f2",
+                 "g[2][10100::int] as f11",
+                 "g[2][10200::int] + 22::REAL  as f2b",
+                 "g.idlf[201600::int] as idl100"})
+            .build();
 
-    plan = veloxString(planVelox(builder.build()).plan);
-    expectRegexp(plan, "float_features.*Subfield.*float_features.10200");
-    expectRegexp(plan, "id_list_features.*Subfields.*id_list_features.201600");
+    auto plan = extractPlanNode(planVelox(logicalPlan));
+    verifyRequiredSubfields(
+        plan,
+        {
+            {"uid", {}},
+            {"float_features", {subfield("10200"), subfield("10100")}},
+            {"id_list_features", {subfield("201600")}},
+        });
   }
   // All of genie is returned.
   {
-    auto builder =
+    auto logicalPlan =
         lp::PlanBuilder()
             .tableScan(kHiveConnectorId, "features", fields)
             .project(
                 {"genie(uid, float_features, id_list_features, id_score_list_features) as g"})
             .project(
                 {"g",
-                 "g[2][10100::INTEGER] as f10",
-                 "g[2][10200::INTEGER] as f2",
-                 "g[3][200600::INTEGER] as idl100"});
+                 "g[2][10100::int] as f10",
+                 "g[2][10200::int] as f2",
+                 "g[3][200600::int] as idl100"})
+            .build();
 
-    plan = veloxString(planVelox(builder.build()).plan);
-    std::cout << plan << std::endl;
+    auto plan = extractPlanNode(planVelox(logicalPlan));
+    verifyRequiredSubfields(
+        plan,
+        {
+            {"uid", {}},
+            {"float_features", {}},
+            {"id_list_features", {}},
+            {"id_score_list_features", {}},
+        });
   }
 
   // We expect the genie to explode and the filters to be first.
@@ -447,22 +537,22 @@ TEST_P(LogicalSubfieldTest, maps) {
                 {"exploding_genie(uid, float_features, id_list_features, id_score_list_features) as g"})
             .project({"g[2] as ff", "g as gg"})
             .project(
-                {"ff[10100::INTEGER] as f10",
-                 "ff[10100::INTEGER] as f11",
-                 "ff[10200::INTEGER] as f2",
-                 "gg[2][10200::INTEGER] + 22::REAL as f2b",
-                 "gg[3][200600::INTEGER] as idl100"})
+                {"ff[10100::int] as f10",
+                 "ff[10100::int] as f11",
+                 "ff[10200::int] as f2",
+                 "gg[2][10200::int] + 22::REAL as f2b",
+                 "gg[3][200600::int] as idl100"})
             .filter("f10 < 10::REAL and f11 < 10::REAL");
 
-    plan = veloxString(planVelox(builder.build()).plan);
-    std::cout << plan << std::endl;
+    auto plan = veloxString(planVelox(builder.build()).plan);
+    // TODO Add verification.
   }
   {
     auto builder =
         lp::PlanBuilder()
             .tableScan(kHiveConnectorId, "features", fields)
             .project(
-                {"transform(id_list_features[201800::INTEGER], x -> x + 1) as ids"});
+                {"transform(id_list_features[201800::int], x -> x + 1) as ids"});
 
     auto result = runVelox(builder.build());
     auto expected = extractAndIncrementIdList(vectors, 201800);
@@ -476,3 +566,5 @@ VELOX_INSTANTIATE_TEST_SUITE_P(
     LogicalSubfieldTests,
     LogicalSubfieldTest,
     testing::ValuesIn(std::vector<int32_t>{1, 2, 3}));
+
+} // namespace facebook::velox::optimizer
