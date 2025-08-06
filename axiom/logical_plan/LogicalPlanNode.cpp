@@ -65,20 +65,24 @@ class UniqueNameChecker {
 } // namespace
 
 ValuesNode::ValuesNode(
-    const std::string& id,
-    const RowTypePtr& rowType,
-    std::vector<Variant> rows)
-    : LogicalPlanNode(NodeKind::kValues, id, {}, rowType),
-      rows_{std::move(rows)} {
-  UniqueNameChecker::check(rowType->names());
-
-  for (const auto& row : rows_) {
+    std::string id,
+    std::vector<RowVectorPtr> values,
+    size_t repeatTimes)
+    : LogicalPlanNode{
+          NodeKind::kValues,
+          std::move(id),
+          {},
+          values.empty() ? ROW({}) : values.front()->rowType()},
+      values_{std::move(values)},
+      repeatTimes_{repeatTimes} {
+  UniqueNameChecker::check(outputType()->names());
+  for (const auto& value : values_) {
+    VELOX_USER_CHECK_NOT_NULL(value);
     VELOX_USER_CHECK(
-        row.isTypeCompatible(rowType),
-        "Incompatible types: {} vs. {}",
-        row.inferType()->toString(),
-        rowType->toString());
+        *outputType() == *value->type(), "All values should have same type");
+    cardinality_ += value->size();
   }
+  cardinality_ *= repeatTimes_;
 }
 
 void ValuesNode::accept(

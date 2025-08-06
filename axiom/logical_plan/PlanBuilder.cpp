@@ -28,23 +28,17 @@
 
 namespace facebook::velox::logical_plan {
 
-PlanBuilder& PlanBuilder::values(
-    const RowTypePtr& rowType,
-    std::vector<Variant> rows) {
+PlanBuilder& PlanBuilder::values(std::vector<RowVectorPtr> values) {
   VELOX_USER_CHECK_NULL(node_, "Values node must be the leaf node");
 
   outputMapping_ = std::make_shared<NameMappings>();
 
-  const auto numColumns = rowType->size();
-  std::vector<std::string> outputNames;
-  outputNames.reserve(numColumns);
+  auto rowType = values.empty() ? ROW({}) : values.front()->rowType();
   for (const auto& name : rowType->names()) {
-    outputNames.push_back(newName(name));
-    outputMapping_->add(name, outputNames.back());
+    outputMapping_->add(name, name);
   }
 
-  node_ = std::make_shared<ValuesNode>(
-      nextId(), ROW(outputNames, rowType->children()), std::move(rows));
+  node_ = std::make_shared<ValuesNode>(nextId(), std::move(values));
 
   return *this;
 }

@@ -735,7 +735,7 @@ struct ValuesTable : public PlanObject {
   JoinEdgeVector joinedBy;
 
   float cardinality() const {
-    return values.rows().size();
+    return values.cardinality();
   }
 
   bool isTable() const override {

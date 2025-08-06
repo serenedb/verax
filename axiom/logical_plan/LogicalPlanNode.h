@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <velox/vector/ComplexVector.h>
 #include "axiom/logical_plan/Expr.h"
 #include "velox/common/Enums.h"
 #include "velox/type/Variant.h"
@@ -111,24 +112,38 @@ class LogicalPlanNode {
 /// A table whose content is embedded in the plan.
 class ValuesNode : public LogicalPlanNode {
  public:
+  // TODO Implement such ctor, unfortunately transform from rows to values isn't
+  // trivial and I'm not sure there's any user of this.
   /// @param rowType Output schema. A list of column names and types. All names
   /// must be non-empty and unique.
   /// @param rows A list of rows. Each row is a list of values, one per column.
   /// The number, order and types of columns must match 'rowType'.
-  ValuesNode(
-      const std::string& id,
-      const RowTypePtr& rowType,
-      std::vector<Variant> rows);
+  // ValuesNode(std::string id, RowTypePtr rowType, std::vector<Variant> rows);
 
-  const std::vector<Variant>& rows() const {
-    return rows_;
+  ValuesNode(
+      std::string id,
+      std::vector<RowVectorPtr> values,
+      size_t repeatTimes = 1);
+
+  uint64_t cardinality() const {
+    return cardinality_;
+  }
+
+  const std::vector<RowVectorPtr>& values() const {
+    return values_;
+  }
+
+  size_t repeatTimes() const {
+    return repeatTimes_;
   }
 
   void accept(const PlanNodeVisitor& visitor, PlanNodeVisitorContext& context)
       const override;
 
  private:
-  const std::vector<Variant> rows_;
+  uint64_t cardinality_ = 0;
+  const std::vector<RowVectorPtr> values_;
+  const size_t repeatTimes_;
 };
 
 using ValuesNodePtr = std::shared_ptr<const ValuesNode>;

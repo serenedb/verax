@@ -839,23 +839,41 @@ TEST_F(PlanTest, values) {
 
   const std::vector<std::string>& names = nationType->names();
 
-  std::vector<Variant> variant_values{
-      Variant::row({int64_t{1}, int64_t{10}, "nation1", "comment1"}),
-      Variant::row({int64_t{2}, int64_t{20}, "nation2", "comment2"}),
-      Variant::row({int64_t{3}, int64_t{30}, "nation3", "comment3"}),
-  };
+  auto row_vector = makeRowVector({
+      makeFlatVector<int64_t>({
+          1,
+          2,
+          3,
+      }),
+      makeFlatVector<int64_t>({
+          10,
+          20,
+          30,
+      }),
+      makeFlatVector<StringView>({
+          "nation1",
+          "nation2",
+          "nation3",
+      }),
+      makeFlatVector<StringView>({
+          "comment1",
+          "comment2",
+          "comment3",
+      }),
+  });
+  row_vector->setType(nationType);
 
   lp::PlanBuilder::Context ctx;
   auto t1 = lp::PlanBuilder(ctx)
-                .values(nationType, variant_values)
+                .values({row_vector})
                 .filter("n_nationkey < 21")
                 .project({"n_nationkey", "n_regionkey"});
   auto t2 = lp::PlanBuilder(ctx)
-                .values(nationType, variant_values)
+                .values({row_vector})
                 .filter("n_nationkey > 16")
                 .project({"n_nationkey", "n_regionkey"});
   auto t3 = lp::PlanBuilder(ctx)
-                .values(nationType, variant_values)
+                .values({row_vector})
                 .filter("n_nationkey <= 5")
                 .project({"n_nationkey", "n_regionkey"});
 
@@ -865,16 +883,8 @@ TEST_F(PlanTest, values) {
                          .filter("cast(rk as integer) in (1, 2, 4, 5)")
                          .build();
 
-  std::vector<RowVectorPtr> vector_values;
-  vector_values.reserve(variant_values.size());
-  for (const auto& literal : variant_values) {
-    vector_values.push_back(std::dynamic_pointer_cast<RowVector>(
-        variantToVector(nationType, literal, pool_.get())));
-    EXPECT_TRUE(vector_values.back());
-  }
-
   auto referencePlan = exec::test::PlanBuilder(pool_.get())
-                           .values(std::move(vector_values))
+                           .values({row_vector})
                            .filter("n_nationkey > 5 and n_nationkey <= 16")
                            .project({"n_nationkey", "n_regionkey + 1 as rk"})
                            .filter("rk in (1, 2, 4, 5)")

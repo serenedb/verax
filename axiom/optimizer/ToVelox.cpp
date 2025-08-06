@@ -1141,18 +1141,11 @@ velox::core::PlanNodePtr Optimization::makeUnionAll(
 core::PlanNodePtr Optimization::makeValues(const Values& values) {
   // TODO we need to remove unnecessary columns from the output type vectors
   // auto neededOutputType = makeOutputType(values.columns());
-  const auto& fullOutputType = values.valuesTable.values.outputType();
 
-  const auto& literal_rows = values.valuesTable.values.rows();
-  std::vector<RowVectorPtr> rows;
-  rows.reserve(literal_rows.size());
-  for (const auto& literal : literal_rows) {
-    rows.push_back(std::static_pointer_cast<RowVector>(
-        variantToVector(fullOutputType, literal, evaluator_.pool())));
-  }
-
-  auto valuesNode =
-      std::make_shared<core::ValuesNode>(nextId(), std::move(rows));
+  auto valuesNode = std::make_shared<core::ValuesNode>(
+      nextId(),
+      values.valuesTable.values.values(),
+      values.valuesTable.values.repeatTimes());
 
   makePredictionAndHistory(valuesNode->id(), &values);
 
