@@ -16,7 +16,6 @@
 
 #include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/Cost.h"
-#include "velox/functions/FunctionRegistry.h"
 
 #include <iostream>
 
@@ -153,24 +152,8 @@ PlanPtr Optimization::bestPlan() {
   return topState_.plans.best(empty, ignore);
 }
 
-std::unordered_map<std::string, float>& baseSelectivities() {
-  static std::unordered_map<std::string, float> map;
-  return map;
-}
-
-FunctionSet functionBits(Name name) {
-  if (auto* md = functionMetadata(name)) {
-    return md->functionSet;
-  }
-  auto deterministic = isDeterministic(name);
-  if (deterministic.has_value() && !deterministic.value()) {
-    return FunctionSet(FunctionSet::kNonDeterministic);
-  }
-  return FunctionSet(0);
-}
-
 Plan::Plan(RelationOpPtr _op, const PlanState& state)
-    : op(_op),
+    : op(std::move(_op)),
       cost(state.cost),
       tables(state.placed),
       columns(state.targetColumns),
@@ -383,16 +366,6 @@ PlanPtr PlanSet::best(const Distribution& distribution, bool& needsShuffle) {
   return best;
 }
 
-float startingScore(PlanObjectCP table) {
-  if (table->type() == PlanType::kTable) {
-    return table->as<BaseTable>()
-        ->schemaTable->columnGroups[0]
-        ->distribution()
-        .cardinality;
-  }
-  return 10;
-}
-
 const JoinEdgeVector& joinedBy(PlanObjectCP table) {
   if (table->type() == PlanType::kTable) {
     return table->as<BaseTable>()->joinedBy;
@@ -428,7 +401,7 @@ void reducingJoinsRecursive(
       continue;
     }
     JoinSide other = join->sideOf(candidate, true);
-    if (!state.dt->tableSet.contains(other.table) || !state.dt->hasJoin(join)) {
+    if (!state.dt->hasTable(other.table) || !state.dt->hasJoin(join)) {
       continue;
     }
     if (other.table->type() != PlanType::kTable) {
@@ -474,6 +447,7 @@ void reducingJoinsRecursive(
   }
 }
 
+namespace {
 JoinCandidate reducingJoins(
     const PlanState& state,
     const JoinCandidate& candidate) {
@@ -578,7 +552,7 @@ void forJoinedTables(const PlanState& state, Func func) {
         }
       } else {
         auto [table, fanout] = join->otherTable(placedTable);
-        if (!state.dt->tableSet.contains(table)) {
+        if (!state.dt->hasTable(table)) {
           continue;
         }
         func(join, table, fanout);
@@ -586,22 +560,27 @@ void forJoinedTables(const PlanState& state, Func func) {
     }
   });
 }
+} // namespace
 
 JoinSide JoinCandidate::sideOf(PlanObjectCP side, bool other) const {
   return join->sideOf(side, other);
 }
 
+namespace {
 bool hasEqual(ExprCP key, const ExprVector& keys) {
   if (key->type() != PlanType::kColumn || !key->as<Column>()->equivalence()) {
     return false;
   }
+
   for (auto& e : keys) {
     if (key->sameOrEqual(*e)) {
       return true;
     }
   }
+
   return false;
 }
+} // namespace
 
 void JoinCandidate::addEdge(PlanState& state, JoinEdgeP edge) {
   auto* joined = tables[0];
@@ -675,6 +654,7 @@ bool NextJoin::isWorse(const NextJoin& other) const {
       other.cost.unitCost + other.cost.setupCost;
 }
 
+namespace {
 bool addExtraEdges(PlanState& state, JoinCandidate& candidate) {
   // See if there are more join edges from the first of 'candidate' to already
   // placed tables. Fill in the non-redundant equalities into the join edge.
@@ -686,7 +666,7 @@ bool addExtraEdges(PlanState& state, JoinCandidate& candidate) {
       continue;
     }
     auto [otherTable, fanout] = otherJoin->otherTable(table);
-    if (!state.dt->tableSet.contains(otherTable)) {
+    if (!state.dt->hasTable(otherTable)) {
       continue;
     }
     if (candidate.isDominantEdge(state, otherJoin)) {
@@ -696,6 +676,7 @@ bool addExtraEdges(PlanState& state, JoinCandidate& candidate) {
   }
   return true;
 }
+} // namespace
 
 std::vector<JoinCandidate> Optimization::nextJoins(PlanState& state) {
   std::vector<JoinCandidate> candidates;
@@ -879,11 +860,7 @@ void Optimization::addPostprocess(
   }
 }
 
-std::vector<ColumnGroupP> chooseLeafIndex(const BaseTable* table) {
-  assert(!table->schemaTable->columnGroups.empty());
-  return {table->schemaTable->columnGroups[0]};
-}
-
+namespace {
 template <typename V>
 CPSpan<Column> leadingColumns(V& exprs) {
   int32_t i = 0;
@@ -985,6 +962,7 @@ float fanoutJoinTypeLimit(core::JoinType joinType, float fanout) {
       return fanout;
   }
 }
+} // namespace
 
 void Optimization::joinByIndex(
     const RelationOpPtr& plan,
@@ -1070,6 +1048,7 @@ std::vector<uint32_t> joinKeyPartition(
   return positions;
 }
 
+namespace {
 PlanObjectSet availableColumns(PlanObjectCP object) {
   PlanObjectSet set;
   if (object->type() == PlanType::kTable) {
@@ -1087,8 +1066,9 @@ PlanObjectSet availableColumns(PlanObjectCP object) {
 }
 
 bool isBroadcastableSize(PlanPtr build, PlanState& /*state*/) {
-  return build->cost.fanout < 100000;
+  return build->cost.fanout < 100'000;
 }
+} // namespace
 
 void Optimization::joinByHash(
     const RelationOpPtr& plan,
@@ -1457,6 +1437,8 @@ void Optimization::addJoin(
   result.insert(result.end(), toTry.begin(), toTry.end());
 }
 
+namespace {
+
 // Sets 'columns' to the columns in 'downstream' that exist
 // in 'index' of 'table'.
 ColumnVector indexColumns(
@@ -1479,6 +1461,7 @@ ColumnVector indexColumns(
   });
   return result;
 }
+} // namespace
 
 void Optimization::tryNextJoins(
     PlanState& state,
@@ -1495,63 +1478,70 @@ void Optimization::tryNextJoins(
 
 RelationOpPtr Optimization::placeSingleRowDt(
     RelationOpPtr plan,
-    const DerivedTable* subq,
+    DerivedTableCP subquery,
     ExprCP filter,
     PlanState& state) {
-  auto broadcast = Distribution::broadcast(DistributionType(), 1);
   MemoKey memoKey;
-  memoKey.firstTable = subq;
-  memoKey.tables.add(subq);
-  for (auto& column : subq->columns) {
+  memoKey.firstTable = subquery;
+  memoKey.tables.add(subquery);
+  for (const auto& column : subquery->columns) {
     memoKey.columns.add(column);
   }
+
+  auto broadcast = Distribution::broadcast(DistributionType(), 1);
   PlanObjectSet empty;
   bool needsShuffle = false;
   auto rightPlan = makePlan(memoKey, broadcast, empty, 1, state, needsShuffle);
+
   auto rightOp = rightPlan->op;
   if (needsShuffle) {
     auto* repartition =
         make<Repartition>(rightOp, broadcast, rightOp->columns());
     rightOp = repartition;
   }
+
   auto resultColumns = plan->columns();
   resultColumns.insert(
       resultColumns.end(),
       rightOp->columns().begin(),
       rightOp->columns().end());
-  auto* join = new (queryCtx()->allocate(sizeof(Join))) Join(
+  auto* join = make<Join>(
       JoinMethod::kCross,
       core::JoinType::kInner,
-      plan,
-      rightOp,
-      {},
-      {},
-      {filter},
+      std::move(plan),
+      std::move(rightOp),
+      ExprVector{},
+      ExprVector{},
+      ExprVector{filter},
       0.5,
-      resultColumns);
+      std::move(resultColumns));
   state.addCost(*join);
   return join;
 }
 
-void Optimization::placeDerivedTable(
-    const DerivedTable* from,
-    PlanState& state) {
+void Optimization::placeDerivedTable(DerivedTableCP from, PlanState& state) {
   PlanStateSaver save(state);
 
   state.placed.add(from);
+
   PlanObjectSet columns = state.downstreamColumns();
+
   PlanObjectSet dtColumns;
-  for (auto column : from->columns) {
+  for (const auto& column : from->columns) {
     dtColumns.add(column);
   }
+
   columns.intersect(dtColumns);
   state.columns.unionSet(columns);
+
   MemoKey key;
   key.columns = columns;
   key.firstTable = from;
   key.tables.add(from);
+
   bool ignore;
   auto plan = makePlan(key, Distribution(), PlanObjectSet(), 1, state, ignore);
+
   // Make plans based on the dt alone as first.
   makeJoins(plan->op, state);
 
@@ -1560,15 +1550,18 @@ void Optimization::placeDerivedTable(
   visited.add(from);
   visited.unionSet(state.dt->importedExistences);
   visited.unionSet(state.dt->fullyImported);
+
   PlanObjectSet reducingSet;
   reducingSet.add(from);
+
   std::vector<PlanObjectCP> path{from};
+
   float reduction = 1;
   reducingJoinsRecursive(
       state, from, 1, 1.2, path, visited, reducingSet, reduction);
+
   if (reduction < 0.9) {
     key.tables = reducingSet;
-    auto savedPlaced = state.placed;
     key.columns = state.downstreamColumns();
     plan = makePlan(key, Distribution(), PlanObjectSet(), 1, state, ignore);
     // Not all reducing joins are necessarily retained in the plan. Only mark
@@ -1583,11 +1576,13 @@ bool Optimization::placeConjuncts(
     PlanState& state,
     bool allowNondeterministic) {
   PlanStateSaver save(state);
-  ExprVector filters;
+
   PlanObjectSet columnsAndSingles = state.columns;
   state.dt->singleRowDts.forEach([&](PlanObjectCP object) {
     columnsAndSingles.unionColumns(object->as<DerivedTable>()->columns);
   });
+
+  ExprVector filters;
   for (auto& conjunct : state.dt->conjuncts) {
     if (!allowNondeterministic && conjunct->containsNonDeterministic()) {
       continue;
@@ -1603,22 +1598,23 @@ bool Optimization::placeConjuncts(
     if (conjunct->columns().isSubset(columnsAndSingles)) {
       // The filter depends on placed tables and non-correlated single row
       // subqueries.
-      std::vector<const DerivedTable*> placeable;
+      std::vector<DerivedTableCP> placeable;
       auto subqColumns = conjunct->columns();
       subqColumns.except(state.columns);
       subqColumns.forEach([&](PlanObjectCP object) {
         state.dt->singleRowDts.forEach([&](PlanObjectCP dtObject) {
-          auto subq = dtObject->as<DerivedTable>();
-          // If the subq provides columns for the filter, place it.
-          auto conjunctColumns = conjunct->columns();
-          for (auto subqColumn : subq->columns) {
+          auto subquery = dtObject->as<DerivedTable>();
+          // If the subquery provides columns for the filter, place it.
+          const auto& conjunctColumns = conjunct->columns();
+          for (auto subqColumn : subquery->columns) {
             if (conjunctColumns.contains(subqColumn)) {
-              placeable.push_back(subq);
+              placeable.push_back(subquery);
               break;
             }
           }
         });
       });
+
       for (auto i = 0; i < placeable.size(); ++i) {
         state.placed.add(conjunct);
         plan = placeSingleRowDt(
@@ -1631,6 +1627,7 @@ bool Optimization::placeConjuncts(
       }
     }
   }
+
   if (!filters.empty()) {
     for (auto& filter : filters) {
       state.placed.add(filter);
@@ -1642,6 +1639,19 @@ bool Optimization::placeConjuncts(
   }
   return false;
 }
+
+namespace {
+
+float startingScore(PlanObjectCP table) {
+  if (table->type() == PlanType::kTable) {
+    return table->as<BaseTable>()
+        ->schemaTable->columnGroups[0]
+        ->distribution()
+        .cardinality;
+  }
+  return 10;
+}
+} // namespace
 
 void Optimization::makeJoins(RelationOpPtr plan, PlanState& state) {
   auto& dt = state.dt;
@@ -1663,7 +1673,7 @@ void Optimization::makeJoins(RelationOpPtr plan, PlanState& state) {
       auto from = firstTables.at(i);
       if (from->type() == PlanType::kTable) {
         auto table = from->as<BaseTable>();
-        auto indices = chooseLeafIndex(table->as<BaseTable>());
+        auto indices = table->as<BaseTable>()->chooseLeafIndex();
         // Make plan starting with each relevant index of the table.
         auto downstream = state.downstreamColumns();
         for (auto index : indices) {

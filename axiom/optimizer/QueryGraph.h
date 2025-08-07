@@ -29,17 +29,6 @@
 /// constant.
 namespace facebook::velox::optimizer {
 
-/// The join structure is described as a tree of derived tables with
-/// base tables as leaves. Joins are described as join graph
-/// edges. Edges describe direction for non-inner joins. Scalar and
-/// existence subqueries are flattened into derived tables or base
-/// tables. The join graph would represent select ... from t where
-/// exists(x) or exists(y) as a derived table of three joined tables
-/// where the edge from t to x and t to y is directed and qualified as
-/// left semijoin. The semijoins project out one column, an existence
-/// flag. The filter would be expresssed as a conjunct under the top
-/// derived table with x-exists or y-exists.
-
 /// A bit set that qualifies an Expr. Represents which functions/kinds
 /// of functions are found inside the children of an Expr.
 class FunctionSet {
@@ -329,87 +318,8 @@ struct LambdaInfo {
   std::vector<int32_t> argOrdinal;
 };
 
-class Call;
-
-struct ResultAccess;
-
-/// Describes functions accepting lambdas and functions with special treatment
-/// of subfields.
-struct FunctionMetadata {
-  bool processSubfields() const {
-    return subfieldArg.has_value() || !fieldIndexForArg.empty() ||
-        isArrayConstructor || isMapConstructor || valuePathToArgPath;
-  }
-
-  const LambdaInfo* lambdaInfo(int32_t index) const {
-    for (const auto& lambda : lambdas) {
-      if (lambda.ordinal == index) {
-        return &lambda;
-      }
-    }
-    return nullptr;
-  }
-
-  std::vector<LambdaInfo> lambdas;
-
-  /// If accessing a subfield on the result means that the same subfield is
-  /// required in an argument, this is the ordinal of the argument. This is 1
-  /// for transform_values, which means that transform_values(map, <lambda>)[1]
-  /// implies that key 1 is accessed in 'map'.
-  std::optional<int32_t> subfieldArg;
-
-  /// If true, then access of subscript 'i' in result means that argument 'i' is
-  /// accessed.
-  bool isArrayConstructor{false};
-
-  /// If key 'k' in result is accessed, then the argument that corresponds to
-  /// this key is accessed.
-  bool isMapConstructor{false};
-
-  /// If ordinal fieldIndexForArg_[i] is accessed, then argument argOrdinal_[i]
-  /// is accessed.
-  std::vector<int32_t> fieldIndexForArg;
-
-  /// Ordinal of argument that produces the result subfield in the corresponding
-  /// element of 'fieldIndexForArg_'.
-  std::vector<int32_t> argOrdinal;
-
-  using ValuePathToArgPath =
-      std::function<std::pair<std::vector<Step>, int32_t>(
-          const std::vector<Step>&,
-          const logical_plan::CallExpr& call)>;
-
-  /// Translates a path over the function result to a path over an argument.
-  ValuePathToArgPath valuePathToArgPath;
-
-  /// bits of FunctionSet for the function.
-  FunctionSet functionSet;
-
-  /// Static fixed cost for processing one row. use 'costFunc' for non-constant
-  /// cost.
-  float cost{1};
-
-  /// Function for evaluating the per-row cost when the cost depends on
-  /// arguments and their stats.
-  std::function<float(const Call*)> costFunc;
-
-  /// Translates a set of paths into path, expression pairs if the complex type
-  /// returning function is decomposable into per-path subexpressions. Suppose
-  /// the function applies array sort to all arrays in a map. suppose it is used
-  /// in [k1][0] and [k2][1]. This could return [k1] = array_sort(arg[k1]) and
-  /// k2 = array_sort(arg[k2]. 'arg'  comes from 'call'.
-  std::function<std::unordered_map<PathCP, core::TypedExprPtr>(
-      const core::CallTypedExpr* call,
-      std::vector<PathCP>& paths)>
-      explode;
-
-  std::function<std::unordered_map<PathCP, logical_plan::ExprPtr>(
-      const logical_plan::CallExpr* call,
-      std::vector<PathCP>& paths)>
-      logicalExplode;
-};
-
-const FunctionMetadata* functionMetadata(Name name);
+struct FunctionMetadata;
+using FunctionMetadataCP = const FunctionMetadata*;
 
 /// Represents a function call or a special form, any expression with
 /// subexpressions.
@@ -420,18 +330,7 @@ class Call : public Expr {
       Name name,
       const Value& value,
       ExprVector args,
-      FunctionSet functions)
-      : Expr(type, value),
-        name_(name),
-        args_(std::move(args)),
-        functions_(functions),
-        metadata_(functionMetadata(name_)) {
-    for (auto arg : args_) {
-      columns_.unionSet(arg->columns());
-      subexpressions_.unionSet(arg->subexpressions());
-      subexpressions_.add(arg);
-    }
-  }
+      FunctionSet functions);
 
   Call(Name name, Value value, ExprVector args, FunctionSet functions)
       : Call(PlanType::kCall, name, value, std::move(args), functions) {}
@@ -461,13 +360,13 @@ class Call : public Expr {
   }
 
   CPSpan<PlanObject> children() const override {
-    return folly::Range<const PlanObject* const*>(
-        reinterpret_cast<const PlanObject* const*>(args_.data()), args_.size());
+    return folly::Range<PlanObjectCP const*>(
+        reinterpret_cast<PlanObjectCP const*>(args_.data()), args_.size());
   }
 
   std::string toString() const override;
 
-  const FunctionMetadata* metadata() const {
+  FunctionMetadataCP metadata() const {
     return metadata_;
   }
 
@@ -481,7 +380,7 @@ class Call : public Expr {
   // Set of functions used in 'this' and 'args'.
   const FunctionSet functions_;
 
-  const FunctionMetadata* metadata_;
+  FunctionMetadataCP metadata_;
 };
 
 using CallCP = const Call*;
@@ -517,6 +416,17 @@ struct Equivalence {
   // Each element has a direct or implied equality edge to every other.
   ColumnVector columns;
 };
+
+/// The join structure is described as a tree of derived tables with
+/// base tables as leaves. Joins are described as join graph
+/// edges. Edges describe direction for non-inner joins. Scalar and
+/// existence subqueries are flattened into derived tables or base
+/// tables. The join graph would represent select ... from t where
+/// exists(x) or exists(y) as a derived table of three joined tables
+/// where the edge from t to x and t to y is directed and qualified as
+/// left semijoin. The semijoins project out one column, an existence
+/// flag. The filter would be expresssed as a conjunct under the top
+/// derived table with x-exists or y-exists.
 
 /// Represents one side of a join. See Join below for the meaning of the
 /// members.
@@ -749,7 +659,6 @@ class JoinEdge {
 };
 
 using JoinEdgeP = JoinEdge*;
-
 using JoinEdgeVector = std::vector<JoinEdgeP, QGAllocator<JoinEdgeP>>;
 
 /// Represents a reference to a table from a query. There is one of these
@@ -783,6 +692,7 @@ struct BaseTable : public PlanObject {
   float filterSelectivity{1};
 
   SubfieldSet controlSubfields;
+
   SubfieldSet payloadSubfields;
 
   bool isTable() const override {
@@ -797,6 +707,12 @@ struct BaseTable : public PlanObject {
   std::optional<int32_t> columnId(Name column) const;
 
   BitSet columnSubfields(int32_t id, bool payloadOnly, bool controlOnly) const;
+
+  // Returns possible indices for driving table scan of 'table'.
+  std::vector<ColumnGroupP> chooseLeafIndex() const {
+    VELOX_DCHECK(!schemaTable->columnGroups.empty());
+    return {schemaTable->columnGroups[0]};
+  }
 
   std::string toString() const override;
 };
@@ -880,30 +796,5 @@ struct AggregationPlan : public PlanObject {
 };
 
 using AggregationPlanCP = const AggregationPlan*;
-
-float tableCardinality(PlanObjectCP table);
-
-/// Returns all distinct tables 'exprs' depend on.
-PlanObjectSet allTables(CPSpan<Expr> exprs);
-
-/// Fills 'leftKeys' and 'rightKeys's from 'conjuncts' so that
-/// equalities with one side only depending on 'right' go to
-/// 'rightKeys' and the other side not depending on 'right' goes to
-/// 'leftKeys'. The left side may depend on more than one table. The
-/// tables 'leftKeys' depend on are returned in 'allLeft'. The
-/// conjuncts that are not equalities or have both sides depending
-/// on right and something else are left in 'conjuncts'.
-void extractNonInnerJoinEqualities(
-    ExprVector& conjuncts,
-    PlanObjectCP right,
-    ExprVector& leftKeys,
-    ExprVector& rightKeys,
-    PlanObjectSet& allLeft);
-
-/// Appends the string representation of 'exprs' to 'out'.
-void exprsToString(const ExprVector& exprs, std::stringstream& out);
-
-ExprCP
-importExpr(ExprCP expr, const ColumnVector& outer, const ExprVector& inner);
 
 } // namespace facebook::velox::optimizer

@@ -53,19 +53,19 @@ void Optimization::markFieldAccessed(
       isControl ? &logicalControlSubfields_ : &logicalPayloadSubfields_;
   if (source.planNode) {
     const auto* path = stepsToPath(steps);
-    if (fields->nodeFields[source.planNode].resultPaths[ordinal].contains(
-            path->id())) {
+    auto& paths = fields->nodeFields[source.planNode].resultPaths[ordinal];
+    if (paths.contains(path->id())) {
       // Already marked.
       return;
     }
-    fields->nodeFields[source.planNode].resultPaths[ordinal].add(path->id());
+    paths.add(path->id());
 
     const auto kind = source.planNode->kind();
     if (kind == lp::NodeKind::kProject) {
       const auto* project = source.planNode->asUnchecked<lp::ProjectNode>();
       const auto& input = project->onlyInput();
       markSubfields(
-          project->expressions()[ordinal],
+          project->expressionAt(ordinal),
           steps,
           isControl,
           {input->outputType().get()},
@@ -92,8 +92,8 @@ void Optimization::markFieldAccessed(
         return;
       }
 
-      const auto& aggregate = agg->aggregates()[ordinal - keys.size()];
-      for (auto& aggregateInput : aggregate->inputs()) {
+      const auto& aggregate = agg->aggregateAt(ordinal - keys.size());
+      for (const auto& aggregateInput : aggregate->inputs()) {
         mark(aggregateInput);
       }
 
@@ -148,8 +148,7 @@ void Optimization::markFieldAccessed(
 
   // The source is a lambda arg. We apply the path to the corresponding
   // container arg of the 2nd order function call that has the lambda.
-  auto* md =
-      FunctionRegistry::instance()->metadata(toName(source.call->name()));
+  auto* md = functionMetadata(toName(source.call->name()));
   const auto* lambdaInfo = md->lambdaInfo(source.lambdaOrdinal);
   const auto nth = lambdaInfo->argOrdinal[ordinal];
 
@@ -283,7 +282,7 @@ void Optimization::markSubfields(
       return;
     }
 
-    const auto* metadata = FunctionRegistry::instance()->metadata(toName(name));
+    const auto* metadata = functionMetadata(toName(name));
     if (!metadata || !metadata->processSubfields()) {
       for (const auto& input : expr->inputs()) {
         std::vector<Step> steps;

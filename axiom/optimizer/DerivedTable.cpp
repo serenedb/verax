@@ -441,6 +441,79 @@ JoinEdgeP importedJoin(
   newJoin->addEquality(innerKey, otherKey);
   return newJoin;
 }
+
+// Returns a copy of 'expr', replacing instances of columns in 'outer' with
+// the corresponding expression from 'inner'
+ExprCP
+importExpr(ExprCP expr, const ColumnVector& outer, const ExprVector& inner) {
+  if (!expr) {
+    return nullptr;
+  }
+
+  switch (expr->type()) {
+    case PlanType::kColumn:
+      for (auto i = 0; i < inner.size(); ++i) {
+        if (outer[i] == expr) {
+          return inner[i];
+        }
+      }
+      return expr;
+    case PlanType::kLiteral:
+      return expr;
+    case PlanType::kCall:
+    case PlanType::kAggregate: {
+      auto children = expr->children();
+      ExprVector newChildren(children.size());
+      FunctionSet functions;
+      bool anyChange = false;
+      for (auto i = 0; i < children.size(); ++i) {
+        newChildren[i] = importExpr(children[i]->as<Expr>(), outer, inner);
+        anyChange |= newChildren[i] != children[i];
+        if (newChildren[i]->isFunction()) {
+          functions = functions | newChildren[i]->as<Call>()->functions();
+        }
+      }
+
+      ExprCP newCondition = nullptr;
+      if (expr->type() == PlanType::kAggregate) {
+        newCondition =
+            importExpr(expr->as<Aggregate>()->condition(), outer, inner);
+        anyChange |= newCondition != expr->as<Aggregate>()->condition();
+
+        if (newCondition && newCondition->isFunction()) {
+          functions = functions | newCondition->as<Call>()->functions();
+        }
+      }
+
+      if (!anyChange) {
+        return expr;
+      }
+
+      if (expr->type() == PlanType::kCall) {
+        const auto* call = expr->as<Call>();
+        return make<Call>(
+            call->name(), call->value(), std::move(newChildren), functions);
+      }
+
+      if (expr->type() == PlanType::kAggregate) {
+        const auto* aggregate = expr->as<Aggregate>();
+        return make<Aggregate>(
+            aggregate->name(),
+            aggregate->value(),
+            std::move(newChildren),
+            functions,
+            aggregate->isDistinct(),
+            newCondition,
+            aggregate->isAccumulator(),
+            aggregate->intermediateType());
+      }
+    }
+      [[fallthrough]];
+    default:
+      VELOX_UNREACHABLE();
+  }
+}
+
 } // namespace
 
 void DerivedTable::importJoinsIntoFirstDt(const DerivedTable* firstDt) {

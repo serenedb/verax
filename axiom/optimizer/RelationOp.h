@@ -20,8 +20,7 @@
 #include "axiom/optimizer/Schema.h"
 
 /// Plan candidates.
-/// A candidate plan is constructed based  on the join graph/derived table
-/// tree.
+/// A candidate plan is constructed based on the join graph/derived table tree.
 
 namespace facebook::velox::optimizer {
 

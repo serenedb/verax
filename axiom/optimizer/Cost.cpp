@@ -15,6 +15,7 @@
  */
 
 #include "axiom/optimizer/Cost.h"
+#include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/JsonUtil.h"
 #include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/PlanUtils.h"

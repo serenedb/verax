@@ -377,6 +377,8 @@ struct IndexInfo {
 
 IndexInfo joinCardinality(PlanObjectCP table, CPSpan<Column> keys);
 
+float tableCardinality(PlanObjectCP table);
+
 float baseSelectivity(PlanObjectCP object);
 
 /// A table in a schema. The table may have multiple differently ordered and

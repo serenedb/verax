@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "axiom/optimizer/QueryGraph.h"
+#include "axiom/optimizer/RelationOp.h"
 
 namespace facebook::velox::optimizer {
 

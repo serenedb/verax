@@ -21,15 +21,10 @@
 #include <sys/time.h>
 
 #include "axiom/optimizer/connectors/hive/LocalHiveConnectorMetadata.h"
-#include "velox/common/base/SuccinctPrinter.h"
 #include "velox/common/file/FileSystems.h"
-#include "velox/common/memory/MmapAllocator.h"
 #include "velox/connectors/hive/HiveConnector.h"
-#include "velox/dwio/common/Options.h"
 #include "velox/dwio/dwrf/RegisterDwrfReader.h"
-#include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/parquet/RegisterParquetReader.h"
-#include "velox/exec/Exchange.h"
 
 #include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/SchemaResolver.h"

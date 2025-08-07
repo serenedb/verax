@@ -140,7 +140,7 @@ std::shared_ptr<runner::Runner> prepareSampleRunner(
   ColumnVector columns;
   sampleColumns.forEach(
       [&](PlanObjectCP c) { columns.push_back(c->as<Column>()); });
-  auto index = chooseLeafIndex(base)[0];
+  auto index = base->chooseLeafIndex()[0];
   auto* scan = make<TableScan>(
       nullptr,
       TableScan::outputDistribution(base, index, columns),

@@ -130,6 +130,17 @@ void Schema::addTable(SchemaTableCP table) const {
   tables_[table->name] = table;
 }
 
+float tableCardinality(PlanObjectCP table) {
+  if (table->type() == PlanType::kTable) {
+    return table->as<BaseTable>()
+        ->schemaTable->columnGroups[0]
+        ->distribution()
+        .cardinality;
+  }
+  VELOX_CHECK(table->type() == PlanType::kDerivedTable);
+  return table->as<DerivedTable>()->distribution->cardinality;
+}
+
 // The fraction of rows of a base table selected by non-join filters. 0.2
 // means 1 in 5 are selected.
 float baseSelectivity(PlanObjectCP object) {
@@ -139,6 +150,7 @@ float baseSelectivity(PlanObjectCP object) {
   return 1;
 }
 
+namespace {
 template <typename T>
 ColumnCP findColumnByName(const T& columns, Name name) {
   for (auto column : columns) {
@@ -149,6 +161,7 @@ ColumnCP findColumnByName(const T& columns, Name name) {
   }
   return nullptr;
 }
+} // namespace
 
 bool SchemaTable::isUnique(CPSpan<Column> columns) const {
   for (auto& column : columns) {
@@ -176,6 +189,8 @@ bool SchemaTable::isUnique(CPSpan<Column> columns) const {
   return false;
 }
 
+namespace {
+
 float combine(float card, int32_t ith, float otherCard) {
   if (ith == 0) {
     return card / otherCard;
@@ -185,6 +200,7 @@ float combine(float card, int32_t ith, float otherCard) {
   }
   return card / otherCard;
 }
+} // namespace
 
 IndexInfo SchemaTable::indexInfo(ColumnGroupP index, CPSpan<Column> columns)
     const {
@@ -369,6 +385,19 @@ Distribution Distribution::rename(
   replace(result.order, exprs, names);
   return result;
 }
+
+namespace {
+
+void exprsToString(const ExprVector& exprs, std::stringstream& out) {
+  int32_t size = exprs.size();
+  for (auto i = 0; i < size; ++i) {
+    if (i > 0) {
+      out << ", ";
+    }
+    out << exprs[i]->toString();
+  }
+}
+} // namespace
 
 std::string Distribution::toString() const {
   if (isBroadcast) {

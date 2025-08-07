@@ -102,15 +102,15 @@ using FunctionDedupMap =
     std::unordered_map<ExprDedupKey, ExprCP, ExprDedupHasher>;
 
 struct VariantPtrHasher {
-  size_t operator()(const std::shared_ptr<const variant>& value) const {
+  size_t operator()(const std::shared_ptr<const Variant>& value) const {
     return value->hash();
   }
 };
 
 struct VariantPtrComparer {
   bool operator()(
-      const std::shared_ptr<const variant>& left,
-      const std::shared_ptr<const variant>& right) const {
+      const std::shared_ptr<const Variant>& left,
+      const std::shared_ptr<const Variant>& right) const {
     return *left == *right;
   }
 };
@@ -489,6 +489,7 @@ struct PlanStateSaver {
 /// there were duplicates.
 struct MemoKey {
   bool operator==(const MemoKey& other) const;
+
   size_t hash() const;
 
   PlanObjectCP firstTable;
@@ -1170,7 +1171,7 @@ class Optimization {
   // Adds a cross join to access a single row from a non-correlated subquery.
   RelationOpPtr placeSingleRowDt(
       RelationOpPtr plan,
-      DerivedTableCP subq,
+      DerivedTableCP subquery,
       ExprCP filter,
       PlanState& state);
 
@@ -1350,7 +1351,7 @@ class Optimization {
   ExprDedupMap exprDedup_;
 
   std::unordered_map<
-      std::shared_ptr<const variant>,
+      std::shared_ptr<const Variant>,
       ExprCP,
       VariantPtrHasher,
       VariantPtrComparer>
@@ -1359,7 +1360,7 @@ class Optimization {
   // Reverse map from dedupped literal to the shared_ptr. We put the
   // shared ptr back into the result plan so the variant never gets
   // copied.
-  std::map<ExprCP, std::shared_ptr<const variant>> reverseConstantDedup_;
+  std::map<ExprCP, std::shared_ptr<const Variant>> reverseConstantDedup_;
 
   // Dedup map fr om name+ExprVector to corresponding Call Expr.
   FunctionDedupMap functionDedup_;
@@ -1511,12 +1512,6 @@ class Optimization {
   std::unique_ptr<BuiltinNames> builtinNames_;
 };
 
-/// Returns possible indices for driving table scan of 'table'.
-std::vector<ColumnGroupP> chooseLeafIndex(const BaseTable* table);
-
-/// Returns bits describing function 'name'.
-FunctionSet functionBits(Name name);
-
 const JoinEdgeVector& joinedBy(PlanObjectCP table);
 
 void filterUpdated(BaseTableCP baseTable, bool updateSelectivity = true);
@@ -1531,6 +1526,7 @@ RowTypePtr skylineStruct(BaseTableCP baseTable, ColumnCP column);
 core::JoinType reverseJoinType(core::JoinType joinType);
 
 PathCP stepsToPath(const std::vector<Step>& steps);
-variant* subscriptLiteral(TypeKind kind, const Step& step);
+
+Variant* subscriptLiteral(TypeKind kind, const Step& step);
 
 } // namespace facebook::velox::optimizer

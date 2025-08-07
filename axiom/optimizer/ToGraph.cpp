@@ -17,8 +17,8 @@
 #include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/Plan.h"
 #include "velox/exec/AggregateFunctionRegistry.h"
-#include "velox/expression/ConstantExpr.h"
 #include "velox/expression/FunctionSignature.h"
+#include "velox/functions/FunctionRegistry.h"
 
 namespace facebook::velox::optimizer {
 
@@ -490,6 +490,22 @@ ExprCP Optimization::makeConstant(const core::ConstantTypedExprPtr& constant) {
   exprDedup_[constant.get()] = literal;
   return literal;
 }
+
+namespace {
+// Returns bits describing function 'name'.
+FunctionSet functionBits(Name name) {
+  if (auto* md = functionMetadata(name)) {
+    return md->functionSet;
+  }
+
+  const auto deterministic = velox::isDeterministic(name);
+  if (deterministic.has_value() && !deterministic.value()) {
+    return FunctionSet(FunctionSet::kNonDeterministic);
+  }
+
+  return FunctionSet(0);
+}
+} // namespace
 
 ExprCP Optimization::translateExpr(const core::TypedExprPtr& expr) {
   if (auto name = columnName(expr)) {

@@ -15,6 +15,7 @@
  */
 
 #include "axiom/optimizer/QueryGraph.h"
+#include "axiom/optimizer/FunctionRegistry.h"
 #include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/PlanUtils.h"
 #include "velox/expression/ScopedVarSetter.h"
@@ -76,6 +77,24 @@ std::string Literal::toString() const {
     out << *literal_;
   }
   return out.str();
+}
+
+Call::Call(
+    PlanType type,
+    Name name,
+    const Value& value,
+    ExprVector args,
+    FunctionSet functions)
+    : Expr(type, value),
+      name_(name),
+      args_(std::move(args)),
+      functions_(functions),
+      metadata_(functionMetadata(name_)) {
+  for (auto arg : args_) {
+    columns_.unionSet(arg->columns());
+    subexpressions_.unionSet(arg->subexpressions());
+    subexpressions_.add(arg);
+  }
 }
 
 std::string Call::toString() const {
@@ -298,16 +317,18 @@ PlanObjectCP Expr::singleTable() const {
   if (type() == PlanType::kColumn) {
     return as<Column>()->relation();
   }
+
   PlanObjectCP table = nullptr;
   bool multiple = false;
   columns_.forEach([&](PlanObjectCP object) {
     VELOX_CHECK(object->type() == PlanType::kColumn);
     if (!table) {
-      table = object->template as<Column>()->relation();
+      table = object->as<Column>()->relation();
     } else if (table != object->as<Column>()->relation()) {
       multiple = true;
     }
   });
+
   return multiple ? nullptr : table;
 }
 
@@ -316,15 +337,6 @@ PlanObjectSet Expr::allTables() const {
   columns_.forEach(
       [&](PlanObjectCP object) { set.add(object->as<Column>()->relation()); });
   return set;
-}
-
-PlanObjectSet allTables(CPSpan<Expr> exprs) {
-  PlanObjectSet all;
-  for (auto expr : exprs) {
-    auto set = expr->allTables();
-    all.unionSet(set);
-  }
-  return all;
 }
 
 Column::Column(
@@ -352,77 +364,6 @@ Column::Column(
   }
 }
 
-// Returns a copy of 'expr', replacing instances of columns in 'outer' with
-// the corresponding expression from 'inner'
-ExprCP
-importExpr(ExprCP expr, const ColumnVector& outer, const ExprVector& inner) {
-  if (!expr) {
-    return nullptr;
-  }
-  switch (expr->type()) {
-    case PlanType::kColumn:
-      for (auto i = 0; i < inner.size(); ++i) {
-        if (outer[i] == expr) {
-          return inner[i];
-        }
-      }
-      return expr;
-    case PlanType::kLiteral:
-      return expr;
-    case PlanType::kCall:
-    case PlanType::kAggregate: {
-      auto children = expr->children();
-      std::vector<ExprCP> newChildren(children.size());
-      FunctionSet functions;
-      bool anyChange = false;
-      for (auto i = 0; i < children.size(); ++i) {
-        newChildren[i] = importExpr(children[i]->as<Expr>(), outer, inner);
-        anyChange |= newChildren[i] != children[i];
-        if (newChildren[i]->isFunction()) {
-          functions = functions | newChildren[i]->as<Call>()->functions();
-        }
-      }
-      ExprCP newCondition = nullptr;
-      if (expr->type() == PlanType::kAggregate) {
-        newCondition =
-            importExpr(expr->as<Aggregate>()->condition(), outer, inner);
-        anyChange |= newCondition != expr->as<Aggregate>()->condition();
-
-        if (newCondition && newCondition->isFunction()) {
-          functions = functions | newCondition->as<Call>()->functions();
-        }
-      }
-      if (!anyChange) {
-        return expr;
-      }
-      ExprVector childVector;
-      childVector.insert(
-          childVector.begin(), newChildren.begin(), newChildren.end());
-      if (expr->type() == PlanType::kCall) {
-        auto call = expr->as<Call>();
-        auto* copy = make<Call>(
-            call->name(), call->value(), std::move(childVector), functions);
-        return copy;
-      } else if (expr->type() == PlanType::kAggregate) {
-        auto aggregate = expr->as<Aggregate>();
-        auto* copy = make<Aggregate>(
-            aggregate->name(),
-            aggregate->value(),
-            std::move(childVector),
-            functions,
-            aggregate->isDistinct(),
-            newCondition,
-            aggregate->isAccumulator(),
-            aggregate->intermediateType());
-        return copy;
-      }
-    }
-      [[fallthrough]];
-    default:
-      VELOX_UNREACHABLE();
-  }
-}
-
 void BaseTable::addFilter(ExprCP expr) {
   const auto& columns = expr->columns();
   bool isMultiColumn = false;
@@ -445,40 +386,6 @@ void BaseTable::addFilter(ExprCP expr) {
   filterUpdated(this);
 }
 
-void extractNonInnerJoinEqualities(
-    ExprVector& conjuncts,
-    PlanObjectCP right,
-    ExprVector& leftKeys,
-    ExprVector& rightKeys,
-    PlanObjectSet& allLeft) {
-  const auto* eq = toName("eq");
-
-  for (auto i = 0; i < conjuncts.size(); ++i) {
-    const auto* conjunct = conjuncts[i];
-    if (isCallExpr(conjunct, eq)) {
-      auto eq = conjunct->as<Call>();
-      auto leftTables = eq->argAt(0)->allTables();
-      auto rightTables = eq->argAt(1)->allTables();
-      if (rightTables.size() == 1 && rightTables.contains(right) &&
-          !leftTables.contains(right)) {
-        allLeft.unionSet(leftTables);
-        leftKeys.push_back(eq->argAt(0));
-        rightKeys.push_back(eq->argAt(1));
-        conjuncts.erase(conjuncts.begin() + i);
-        --i;
-      } else if (
-          leftTables.size() == 1 && leftTables.contains(right) &&
-          !rightTables.contains(right)) {
-        allLeft.unionSet(rightTables);
-        leftKeys.push_back(eq->argAt(1));
-        rightKeys.push_back(eq->argAt(0));
-        conjuncts.erase(conjuncts.begin() + i);
-        --i;
-      }
-    }
-  }
-}
-
 namespace {
 template <typename U>
 inline CPSpan<Column> toRangeCast(const ExprVector& exprs) {
@@ -486,17 +393,6 @@ inline CPSpan<Column> toRangeCast(const ExprVector& exprs) {
       reinterpret_cast<const Column* const*>(exprs.data()), exprs.size());
 }
 } // namespace
-
-float tableCardinality(PlanObjectCP table) {
-  if (table->type() == PlanType::kTable) {
-    return table->as<BaseTable>()
-        ->schemaTable->columnGroups[0]
-        ->distribution()
-        .cardinality;
-  }
-  VELOX_CHECK(table->type() == PlanType::kDerivedTable);
-  return table->as<DerivedTable>()->distribution->cardinality;
-}
 
 void JoinEdge::guessFanout() {
   if (fanoutsFixed_) {
@@ -526,13 +422,6 @@ void JoinEdge::guessFanout() {
     rlFanout_ = baseSelectivity(leftTable_);
     lrFanout_ = tableCardinality(rightTable_) / tableCardinality(leftTable_) *
         baseSelectivity(rightTable_);
-  }
-}
-
-void exprsToString(const ExprVector& exprs, std::stringstream& out) {
-  int32_t size = exprs.size();
-  for (auto i = 0; i < size; ++i) {
-    out << exprs[i]->toString() << (i < size - 1 ? ", " : "");
   }
 }
 

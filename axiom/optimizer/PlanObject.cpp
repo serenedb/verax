@@ -15,7 +15,6 @@
  */
 
 #include "axiom/optimizer/QueryGraph.h"
-#include "velox/common/base/SimdUtil.h"
 
 namespace facebook::velox::optimizer {
 

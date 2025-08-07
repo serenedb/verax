@@ -17,7 +17,6 @@
 #pragma once
 
 #include "axiom/optimizer/BitSet.h"
-#include "axiom/optimizer/QueryGraphContext.h"
 
 namespace facebook::velox::optimizer {
 
@@ -121,6 +120,10 @@ class PlanObject {
   const int32_t id_;
 };
 
+using PlanObjectP = PlanObject*;
+using PlanObjectCP = const PlanObject*;
+using PlanObjectVector = std::vector<PlanObjectCP, QGAllocator<PlanObjectCP>>;
+
 /// Set of PlanObjects. Uses the objects id() as an index into a bitmap.
 class PlanObjectSet : public BitSet {
  public:
@@ -186,8 +189,6 @@ class PlanObjectSet : public BitSet {
   /// if 'names' is true.
   std::string toString(bool names) const;
 };
-
-using PlanObjectVector = std::vector<PlanObjectCP, QGAllocator<PlanObjectCP>>;
 
 } // namespace facebook::velox::optimizer
 

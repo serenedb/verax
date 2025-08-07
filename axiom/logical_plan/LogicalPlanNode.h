@@ -343,6 +343,11 @@ class AggregateNode : public LogicalPlanNode {
     return aggregates_;
   }
 
+  const AggregateExprPtr& aggregateAt(size_t index) const {
+    VELOX_USER_CHECK_LT(index, aggregates_.size());
+    return aggregates_.at(index);
+  }
+
   void accept(const PlanNodeVisitor& visitor, PlanNodeVisitorContext& context)
       const override;
 

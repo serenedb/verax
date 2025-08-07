@@ -312,9 +312,9 @@ class QueryGraphContext {
     return pathById_[id];
   }
 
-  /// Takes ownership of a  variant for the duration. Variants are allocated
+  /// Takes ownership of a Variant for the duration. Variants are allocated
   /// with new so not in the arena.
-  variant* registerVariant(std::unique_ptr<variant> value) {
+  Variant* registerVariant(std::unique_ptr<Variant> value) {
     allVariants_.push_back(std::move(value));
     return allVariants_.back().get();
   }
@@ -341,6 +341,7 @@ class QueryGraphContext {
       deduppedObjects_;
 
   std::unordered_set<TypePtr, TypeHasher, TypeComparer> deduppedTypes_;
+
   // Maps raw Type* back to shared TypePtr. Used in toType()() and toTypePtr().
   std::unordered_map<const velox::Type*, velox::TypePtr> toTypePtr_;
 
@@ -359,7 +360,7 @@ class QueryGraphContext {
   Plan* contextPlan_{nullptr};
   Optimization* optimization_{nullptr};
 
-  std::vector<std::unique_ptr<variant>> allVariants_;
+  std::vector<std::unique_ptr<Variant>> allVariants_;
 };
 
 /// Returns a mutable reference to the calling thread's QueryGraphContext.
@@ -388,6 +389,7 @@ inline _Tp* make(_Args&&... __args) {
 
 /// Shorthand for toType() in thread's QueryGraphContext.
 const Type* toType(const TypePtr& type);
+
 /// Shorthand for toTypePtr() in thread's QueryGraphContext.
 const TypePtr& toTypePtr(const Type* type);
 
@@ -401,9 +403,10 @@ inline void Path::operator delete(void* ptr) {
 // Forward declarations of common types and collections.
 class Expr;
 using ExprCP = const Expr*;
+using ExprVector = std::vector<ExprCP, QGAllocator<ExprCP>>;
+
 class Column;
 using ColumnCP = const Column*;
-using ExprVector = std::vector<ExprCP, QGAllocator<ExprCP>>;
 using ColumnVector = std::vector<ColumnCP, QGAllocator<ColumnCP>>;
 
 } // namespace facebook::velox::optimizer

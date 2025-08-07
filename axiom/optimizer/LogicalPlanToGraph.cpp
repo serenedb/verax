@@ -22,6 +22,7 @@
 #include "velox/exec/AggregateFunctionRegistry.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/expression/FunctionSignature.h"
+#include "velox/functions/FunctionRegistry.h"
 #include "velox/vector/VariantToVector.h"
 
 namespace facebook::velox::optimizer {
@@ -337,6 +338,7 @@ ExprCP Optimization::makeGettersOverSkyline(
     }
     last = steps.size();
   }
+
   std::vector<Step> reverse;
   for (int32_t i = last - 1; i >= 0; --i) {
     // We make a getter over expr made so far with 'steps[i]' as first.
@@ -427,8 +429,7 @@ BitSet Optimization::functionSubfields(
 
 void Optimization::ensureFunctionSubfields(const lp::ExprPtr& expr) {
   if (const auto* call = expr->asUnchecked<lp::CallExpr>()) {
-    auto metadata = FunctionRegistry::instance()->metadata(
-        exec::sanitizeName(call->name()));
+    auto metadata = functionMetadata(exec::sanitizeName(call->name()));
     if (!metadata) {
       return;
     }
@@ -552,6 +553,21 @@ const char* specialFormCallName(const lp::SpecialFormExpr* form) {
       VELOX_UNREACHABLE(lp::SpecialFormName::toName(form->form()));
   }
 }
+
+// Returns bits describing function 'name'.
+FunctionSet functionBits(Name name) {
+  if (auto* md = functionMetadata(name)) {
+    return md->functionSet;
+  }
+
+  const auto deterministic = velox::isDeterministic(name);
+  if (deterministic.has_value() && !deterministic.value()) {
+    return FunctionSet(FunctionSet::kNonDeterministic);
+  }
+
+  return FunctionSet(0);
+}
+
 } // namespace
 
 ExprCP Optimization::translateExpr(const lp::ExprPtr& expr) {
@@ -571,7 +587,7 @@ ExprCP Optimization::translateExpr(const lp::ExprPtr& expr) {
   std::string callName;
   if (call) {
     callName = exec::sanitizeName(call->name());
-    auto* metadata = FunctionRegistry::instance()->metadata(callName);
+    auto* metadata = functionMetadata(callName);
     if (metadata && metadata->processSubfields()) {
       auto translated = translateSubfieldFunction(call, metadata);
       if (translated.has_value()) {
@@ -826,6 +842,50 @@ PlanObjectP Optimization::addOrderBy(const lp::SortNode& order) {
   currentSelect_->orderBy = make<OrderBy>(nullptr, keys, orderType);
   return currentSelect_;
 }
+
+namespace {
+
+// Fills 'leftKeys' and 'rightKeys's from 'conjuncts' so that
+// equalities with one side only depending on 'right' go to
+// 'rightKeys' and the other side not depending on 'right' goes to
+// 'leftKeys'. The left side may depend on more than one table. The
+// tables 'leftKeys' depend on are returned in 'allLeft'. The
+// conjuncts that are not equalities or have both sides depending
+// on right and something else are left in 'conjuncts'.
+void extractNonInnerJoinEqualities(
+    ExprVector& conjuncts,
+    PlanObjectCP right,
+    ExprVector& leftKeys,
+    ExprVector& rightKeys,
+    PlanObjectSet& allLeft) {
+  const auto* eq = toName("eq");
+
+  for (auto i = 0; i < conjuncts.size(); ++i) {
+    const auto* conjunct = conjuncts[i];
+    if (isCallExpr(conjunct, eq)) {
+      const auto* eq = conjunct->as<Call>();
+      const auto leftTables = eq->argAt(0)->allTables();
+      const auto rightTables = eq->argAt(1)->allTables();
+      if (rightTables.size() == 1 && rightTables.contains(right) &&
+          !leftTables.contains(right)) {
+        allLeft.unionSet(leftTables);
+        leftKeys.push_back(eq->argAt(0));
+        rightKeys.push_back(eq->argAt(1));
+        conjuncts.erase(conjuncts.begin() + i);
+        --i;
+      } else if (
+          leftTables.size() == 1 && leftTables.contains(right) &&
+          !rightTables.contains(right)) {
+        allLeft.unionSet(rightTables);
+        leftKeys.push_back(eq->argAt(1));
+        rightKeys.push_back(eq->argAt(0));
+        conjuncts.erase(conjuncts.begin() + i);
+        --i;
+      }
+    }
+  }
+}
+} // namespace
 
 void Optimization::translateJoin(const lp::JoinNode& join) {
   const auto& joinLeft = join.left();
