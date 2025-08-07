@@ -136,6 +136,8 @@ float tableCardinality(PlanObjectCP table) {
         ->schemaTable->columnGroups[0]
         ->distribution()
         .cardinality;
+  } else if (table->type() == PlanType::kValuesTable) {
+    return table->as<ValuesTable>()->cardinality();
   }
   VELOX_CHECK(table->type() == PlanType::kDerivedTable);
   return table->as<DerivedTable>()->distribution->cardinality;

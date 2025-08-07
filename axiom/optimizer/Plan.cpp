@@ -1629,6 +1629,8 @@ float startingScore(PlanObjectCP table) {
         ->schemaTable->columnGroups[0]
         ->distribution()
         .cardinality;
+  } else if (table->type() == PlanType::kValuesTable) {
+    return table->as<ValuesTable>()->cardinality();
   }
   return 10;
 }
