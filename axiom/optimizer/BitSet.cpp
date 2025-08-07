@@ -82,7 +82,7 @@ void BitSet::unionSet(const BitSet& other) {
 void BitSet::intersect(const BitSet& other) {
   bits_.resize(std::min(bits_.size(), other.bits_.size()));
   for (auto i = 0; i < bits_.size(); ++i) {
-    assert(!other.bits_.empty());
+    VELOX_DCHECK(!other.bits_.empty());
     bits_[i] &= other.bits_[i];
   }
 }

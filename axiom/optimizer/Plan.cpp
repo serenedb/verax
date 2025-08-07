@@ -357,12 +357,12 @@ PlanPtr PlanSet::best(const Distribution& distribution, bool& needsShuffle) {
     float shuffle = shuffleCost(best->op->columns()) * best->cost.fanout;
     if (bestCost + shuffle < matchCost) {
       needsShuffle = true;
-      assert(best != nullptr);
+      VELOX_DCHECK_NOT_NULL(best);
       return best;
     }
   }
   needsShuffle = best != match;
-  assert(best != nullptr);
+  VELOX_DCHECK_NOT_NULL(best);
   return best;
 }
 
@@ -458,7 +458,7 @@ JoinCandidate reducingJoins(
   PlanObjectSet reducingSet;
   if (candidate.join->isInner()) {
     PlanObjectSet visited = state.placed;
-    assert(!candidate.tables.empty()); // lint
+    VELOX_DCHECK(!candidate.tables.empty());
     visited.add(candidate.tables[0]);
     reducingSet.add(candidate.tables[0]);
     std::vector<PlanObjectCP> path{candidate.tables[0]};
@@ -486,7 +486,7 @@ JoinCandidate reducingJoins(
   if (!state.dt->noImportOfExists) {
     PlanObjectSet exists;
     float reduction = 1;
-    assert(!candidate.tables.empty());
+    VELOX_DCHECK(!candidate.tables.empty());
     std::vector<PlanObjectCP> path{candidate.tables[0]};
     // Look for reducing joins that were not added before, also covering already
     // placed tables. This may copy reducing joins from a probe to the
@@ -1075,7 +1075,7 @@ void Optimization::joinByHash(
     const JoinCandidate& candidate,
     PlanState& state,
     std::vector<NextJoin>& toTry) {
-  assert(!candidate.tables.empty());
+  VELOX_DCHECK(!candidate.tables.empty());
   auto build = candidate.sideOf(candidate.tables[0]);
   auto probe = candidate.sideOf(candidate.tables[0], true);
   ExprVector copartition;
@@ -1173,7 +1173,7 @@ void Optimization::joinByHash(
         if (distCols.size() <= nthKey) {
           distCols.resize(nthKey + 1);
         }
-        assert(!distCols.empty());
+        VELOX_DCHECK(!distCols.empty());
         distCols[nthKey] = probe.keys[i];
       }
     }
@@ -1263,7 +1263,7 @@ void Optimization::joinByHashRight(
     const JoinCandidate& candidate,
     PlanState& state,
     std::vector<NextJoin>& toTry) {
-  assert(!candidate.tables.empty());
+  VELOX_DCHECK(!candidate.tables.empty());
   auto probe = candidate.sideOf(candidate.tables[0]);
   auto build = candidate.sideOf(candidate.tables[0], true);
   PlanStateSaver save(state, candidate);
@@ -1321,7 +1321,7 @@ void Optimization::joinByHashRight(
       if (buildPartCols.size() <= nthKey) {
         buildPartCols.resize(nthKey + 1);
       }
-      assert(isSingle_ || !buildPartCols.empty());
+      VELOX_DCHECK(isSingle_ || !buildPartCols.empty());
       buildPartCols[nthKey] = build.keys[i];
     }
   }
