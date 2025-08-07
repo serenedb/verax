@@ -93,18 +93,21 @@ class ExprResolver {
 class PlanBuilder {
  public:
   struct Context {
+    std::optional<std::string> defaultConnectorId;
     std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator;
     std::shared_ptr<NameAllocator> nameAllocator;
     std::shared_ptr<core::QueryCtx> queryCtx;
     ExprResolver::FunctionRewriteHook hook;
 
     Context(
+        const std::optional<std::string>& defaultConnectorId = std::nullopt,
         std::shared_ptr<core::QueryCtx> queryCtx = nullptr,
         ExprResolver::FunctionRewriteHook hook = nullptr)
-        : planNodeIdGenerator{std::make_shared<core::PlanNodeIdGenerator>()},
+        : defaultConnectorId{defaultConnectorId},
+          planNodeIdGenerator{std::make_shared<core::PlanNodeIdGenerator>()},
           nameAllocator{std::make_shared<NameAllocator>()},
           queryCtx(std::move(queryCtx)),
-          hook(hook) {}
+          hook(std::move(hook)) {}
   };
 
   using Scope = std::function<ExprPtr(
@@ -118,7 +121,8 @@ class PlanBuilder {
         resolver_(nullptr, nullptr) {}
 
   explicit PlanBuilder(const Context& context, Scope outerScope = nullptr)
-      : planNodeIdGenerator_{context.planNodeIdGenerator},
+      : defaultConnectorId_(context.defaultConnectorId),
+        planNodeIdGenerator_{context.planNodeIdGenerator},
         nameAllocator_{context.nameAllocator},
         outerScope_{std::move(outerScope)},
         resolver_(context.queryCtx, context.hook) {
@@ -128,10 +132,34 @@ class PlanBuilder {
 
   PlanBuilder& values(const RowTypePtr& rowType, std::vector<Variant> rows);
 
+  /// Equivalent to SELECT col1, col2,.. FROM <tableName>.
   PlanBuilder& tableScan(
       const std::string& connectorId,
       const std::string& tableName,
       const std::vector<std::string>& columnNames);
+
+  PlanBuilder& tableScan(
+      const std::string& tableName,
+      const std::vector<std::string>& columnNames);
+
+  /// Equivalent to SELECT * FROM <tableName>.
+  PlanBuilder& tableScan(
+      const std::string& connectorId,
+      const std::string& tableName);
+
+  PlanBuilder& tableScan(const std::string& tableName);
+
+  /// Equivalent to SELECT * FROM t1, t2, t3...
+  ///
+  /// Shortcut for
+  ///
+  ///   PlanBuilder(context)
+  ///     .tableScan(t1)
+  ///     .crossJoin(PlanBuilder(context).tableScan(t2))
+  ///     .crossJoin(PlanBuilder(context).tableScan(t3))
+  ///     ...
+  ///     .build();
+  PlanBuilder& from(const std::vector<std::string>& tableNames);
 
   PlanBuilder& filter(const std::string& predicate);
 
@@ -252,6 +280,7 @@ class PlanBuilder {
       std::vector<ExprPtr>& exprs,
       NameMappings& mappings);
 
+  const std::optional<std::string> defaultConnectorId_;
   const std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator_;
   const std::shared_ptr<NameAllocator> nameAllocator_;
   const Scope outerScope_;

@@ -16,6 +16,7 @@ velox_add_library(velox_optimizer_tests_parquet_tpch ParquetTpchTest.cpp)
 
 velox_link_libraries(
   velox_optimizer_tests_parquet_tpch
+  velox_fe_logical_plan_builder
   velox_verax
   velox_schema_resolver
   velox_tpch_gen

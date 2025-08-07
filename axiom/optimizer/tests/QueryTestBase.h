@@ -86,10 +86,6 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
 
   std::string veloxString(const runner::MultiFragmentPlanPtr& plan);
 
-  static void expectPlan(
-      const std::string& actual,
-      const std::string& expected);
-
   core::DuckDbQueryPlanner& planner() {
     return *planner_;
   }

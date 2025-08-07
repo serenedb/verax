@@ -367,50 +367,6 @@ std::string QueryTestBase::veloxString(
   return out.str();
 }
 
-namespace {
-// Breaks str into tokens at whitespace and punctuation. Returns tokens as
-// string, character position pairs.
-std::vector<std::pair<std::string, int32_t>> tokenize(const std::string& str) {
-  std::vector<std::pair<std::string, int32_t>> result;
-  std::string token;
-  for (auto i = 0; i < str.size(); ++i) {
-    char c = str[i];
-    if (strchr(" \n\t", c)) {
-      if (token.empty()) {
-        continue;
-      }
-      auto offset = i - token.size();
-      result.push_back(std::make_pair(std::move(token), offset));
-    } else if (strchr("()[]*%", c)) {
-      if (!token.empty()) {
-        auto offset = i - token.size();
-        result.push_back(std::make_pair(std::move(token), offset));
-      }
-      token.resize(1);
-      token[0] = c;
-      result.push_back(std::make_pair(std::move(token), i));
-    } else {
-      token.push_back(c);
-    }
-  }
-  return result;
-}
-} // namespace
-
-// static
-void QueryTestBase::expectPlan(
-    const std::string& actual,
-    const std::string& expected) {
-  const auto expectedTokens = tokenize(expected);
-  const auto actualTokens = tokenize(actual);
-  for (auto i = 0; i < actualTokens.size() && i < expectedTokens.size(); ++i) {
-    ASSERT_EQ(actualTokens[i].first, expectedTokens[i].first)
-        << "Difference at " << i << " position " << actualTokens[i].second
-        << "= " << actualTokens[i].first << " vs " << expectedTokens[i].first
-        << "\nactual  =" << actual << "\nexpected=" << expected;
-  }
-}
-
 void QueryTestBase::assertSame(
     const core::PlanNodePtr& reference,
     optimizer::PlanAndStats& experiment,

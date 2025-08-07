@@ -257,17 +257,12 @@ class LogicalSubfieldTest : public QueryTestBase,
   };
 
   void testMakeRowFromMap() {
-    lp::PlanBuilder::Context ctx(getQueryCtx(), resolveDfFunction);
+    lp::PlanBuilder::Context ctx(
+        exec::test::kHiveConnectorId, getQueryCtx(), resolveDfFunction);
     auto logicalPlan =
         lp::PlanBuilder(ctx)
-            .tableScan(
-                exec::test::kHiveConnectorId,
-                "features",
-                {"float_features", "id_list_features"})
-            .unionAll(lp::PlanBuilder(ctx).tableScan(
-                exec::test::kHiveConnectorId,
-                "features",
-                {"float_features", "id_list_features"}))
+            .tableScan("features")
+            .unionAll(lp::PlanBuilder(ctx).tableScan("features"))
             .project(
                 {"make_row_from_map(float_features, array[10010, 10020, 10030], array['f1', 'f2', 'f3']) as r"})
             .project(

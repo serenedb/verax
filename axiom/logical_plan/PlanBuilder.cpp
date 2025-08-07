@@ -49,6 +49,72 @@ PlanBuilder& PlanBuilder::values(
   return *this;
 }
 
+PlanBuilder& PlanBuilder::tableScan(const std::string& tableName) {
+  VELOX_USER_CHECK(defaultConnectorId_.has_value());
+  return tableScan(defaultConnectorId_.value(), tableName);
+}
+
+PlanBuilder& PlanBuilder::from(const std::vector<std::string>& tableNames) {
+  VELOX_USER_CHECK_NULL(node_, "Table scan node must be the leaf node");
+  VELOX_USER_CHECK(!tableNames.empty());
+
+  tableScan(tableNames.front());
+
+  Context context{defaultConnectorId_};
+  context.planNodeIdGenerator = planNodeIdGenerator_;
+  context.nameAllocator = nameAllocator_;
+
+  for (auto i = 1; i < tableNames.size(); ++i) {
+    crossJoin(PlanBuilder(context).tableScan(tableNames.at(i)));
+  }
+
+  return *this;
+}
+
+PlanBuilder& PlanBuilder::tableScan(
+    const std::string& connectorId,
+    const std::string& tableName) {
+  VELOX_USER_CHECK_NULL(node_, "Table scan node must be the leaf node");
+
+  auto* metadata = connector::getConnector(connectorId)->metadata();
+  auto* table = metadata->findTable(tableName);
+  VELOX_USER_CHECK_NOT_NULL(table, "Table not found: {}", tableName);
+  const auto& schema = table->rowType();
+
+  const auto numColumns = schema->size();
+
+  std::vector<TypePtr> columnTypes;
+  columnTypes.reserve(numColumns);
+
+  std::vector<std::string> outputNames;
+  outputNames.reserve(numColumns);
+
+  outputMapping_ = std::make_shared<NameMappings>();
+
+  for (auto i = 0; i < schema->size(); ++i) {
+    columnTypes.push_back(schema->childAt(i));
+
+    outputNames.push_back(newName(schema->nameOf(i)));
+    outputMapping_->add(schema->nameOf(i), outputNames.back());
+  }
+
+  node_ = std::make_shared<TableScanNode>(
+      nextId(),
+      ROW(outputNames, columnTypes),
+      connectorId,
+      tableName,
+      schema->names());
+
+  return *this;
+}
+
+PlanBuilder& PlanBuilder::tableScan(
+    const std::string& tableName,
+    const std::vector<std::string>& columnNames) {
+  VELOX_USER_CHECK(defaultConnectorId_.has_value());
+  return tableScan(defaultConnectorId_.value(), tableName, columnNames);
+}
+
 PlanBuilder& PlanBuilder::tableScan(
     const std::string& connectorId,
     const std::string& tableName,

@@ -358,7 +358,7 @@ class Table {
   }
 
   /// Returns the set of columns as abstract, non-owned
-  /// columns. Implementations may hav different Column
+  /// columns. Implementations may have different Column
   /// implementations with different options, so we do not return the
   /// implementation's columns but an abstract form.
   virtual const std::unordered_map<std::string, const Column*>& columnMap()
