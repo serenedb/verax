@@ -27,6 +27,8 @@
 
 DEFINE_string(subfield_data_path, "", "Data directory for subfield test data");
 
+DECLARE_int32(num_workers);
+
 using namespace facebook::velox::optimizer::test;
 using namespace facebook::velox::exec::test;
 
@@ -274,13 +276,36 @@ class LogicalSubfieldTest : public QueryTestBase,
             .project({"make_named_row('rf2', named.f2b * 2::REAL) as fin"})
             .build();
 
-    auto fragmentedPlan = planVelox(logicalPlan);
+    const auto plan = toSingleNodePlan(logicalPlan);
 
     verifyRequiredSubfields(
-        extractPlanNode(fragmentedPlan),
-        {{"float_features", {subfield("10010"), subfield("10020")}}});
+        plan, {{"float_features", {subfield("10010"), subfield("10020")}}});
 
-    // TODO Verify remaining filter and overall plan shape.
+    auto matcher =
+        core::PlanMatcherBuilder()
+            .hiveScan("features", {}, "float_features[10010] + 1 < 10000")
+            .project()
+            .localPartition(
+                core::PlanMatcherBuilder()
+                    .hiveScan(
+                        "features", {}, "float_features[10010] + 1 < 10000")
+                    .project()
+                    .build())
+            .project()
+            .build();
+
+    ASSERT_TRUE(matcher->match(plan));
+  }
+
+  core::PlanNodePtr toSingleNodePlan(
+      const lp::LogicalPlanNodePtr& logicalPlan) {
+    gflags::FlagSaver saver;
+    FLAGS_num_workers = 1;
+
+    auto plan = planVelox(logicalPlan).plan;
+
+    EXPECT_EQ(1, plan->fragments().size());
+    return plan->fragments().at(0).fragment.planNode;
   }
 
   void createTable(
@@ -297,6 +322,7 @@ class LogicalSubfieldTest : public QueryTestBase,
     tablesCreated();
   }
 
+  // TODO Move to PlanMatcher.
   static void verifyRequiredSubfields(
       const core::PlanNodePtr& plan,
       const std::unordered_map<std::string, std::vector<std::string>>&

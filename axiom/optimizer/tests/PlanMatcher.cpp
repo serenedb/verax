@@ -90,12 +90,16 @@ class HiveScanMatcher : public PlanMatcherImpl<TableScanNode> {
  public:
   HiveScanMatcher(
       const std::string& tableName,
-      common::SubfieldFilters subfieldFilters)
+      common::SubfieldFilters subfieldFilters,
+      const std::string& remainingFilter)
       : PlanMatcherImpl<TableScanNode>(),
         tableName_{tableName},
-        subfieldFilters_{std::move(subfieldFilters)} {}
+        subfieldFilters_{std::move(subfieldFilters)},
+        remainingFilter_{remainingFilter} {}
 
   bool matchDetails(const TableScanNode& plan) const override {
+    SCOPED_TRACE(fmt::format("HiveScanMatcher: {}", plan.toString(true, true)));
+
     const auto* hiveTableHandle =
         dynamic_cast<const connector::hive::HiveTableHandle*>(
             plan.tableHandle().get());
@@ -132,12 +136,30 @@ class HiveScanMatcher : public PlanMatcherImpl<TableScanNode> {
       }
     }
 
+    const auto& remainingFilter = hiveTableHandle->remainingFilter();
+    if (remainingFilter == nullptr) {
+      EXPECT_TRUE(remainingFilter_.empty())
+          << "Expected remaining filter: " << remainingFilter_;
+    } else if (remainingFilter_.empty()) {
+      EXPECT_TRUE(remainingFilter == nullptr)
+          << "Expected no remaining filter, but got "
+          << remainingFilter->toString();
+    } else {
+      auto expected = parse::parseExpr(remainingFilter_, {});
+      EXPECT_EQ(remainingFilter->toString(), expected->toString());
+    }
+
+    if (::testing::Test::HasNonfatalFailure()) {
+      return false;
+    }
+
     return true;
   }
 
  private:
   const std::string tableName_;
   const common::SubfieldFilters subfieldFilters_;
+  const std::string remainingFilter_;
 };
 
 class FilterMatcher : public PlanMatcherImpl<FilterNode> {
@@ -238,10 +260,11 @@ PlanMatcherBuilder& PlanMatcherBuilder::tableScan(
 
 PlanMatcherBuilder& PlanMatcherBuilder::hiveScan(
     const std::string& tableName,
-    common::SubfieldFilters subfieldFilters) {
+    common::SubfieldFilters subfieldFilters,
+    const std::string& remainingFilter) {
   VELOX_USER_CHECK_NULL(matcher_);
-  matcher_ =
-      std::make_shared<HiveScanMatcher>(tableName, std::move(subfieldFilters));
+  matcher_ = std::make_shared<HiveScanMatcher>(
+      tableName, std::move(subfieldFilters), remainingFilter);
   return *this;
 }
 

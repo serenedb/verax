@@ -365,7 +365,7 @@ TEST_F(PlanTest, filterBreakup) {
       "        (\n"
       "                l_partkey = p_partkey\n"
       "                and p_brand = 'Brand#12'\n"
-      "                and p_container in ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')\n"
+      "                and p_container like 'SM%'\n"
       "                and l_quantity >= 1.0 and l_quantity <= 1.0 + 10.0\n"
       "                and p_size between 1::int and 5::int\n"
       "                and l_shipmode in ('AIR', 'AIR REG')\n"
@@ -375,7 +375,7 @@ TEST_F(PlanTest, filterBreakup) {
       "        (\n"
       "                p_partkey = l_partkey\n"
       "                and p_brand = 'Brand#23'\n"
-      "                and p_container in ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')\n"
+      "                and p_container like 'MED%'\n"
       "                and l_quantity >= 10.0 and l_quantity <= 10.0 + 10.0\n"
       "                and p_size between 1::int and 10::int\n"
       "                and l_shipmode in ('AIR', 'AIR REG')\n"
@@ -385,7 +385,7 @@ TEST_F(PlanTest, filterBreakup) {
       "        (\n"
       "                p_partkey = l_partkey\n"
       "                and p_brand = 'Brand#34'\n"
-      "                and p_container in ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')\n"
+      "                and p_container like 'LG%'\n"
       "                and l_quantity >= 20.0 and l_quantity <= 20.0 + 10.0\n"
       "                and p_size between 1::int and 15::int\n"
       "                and l_shipmode in ('AIR', 'AIR REG')\n"
@@ -399,6 +399,7 @@ TEST_F(PlanTest, filterBreakup) {
        {"l_extendedprice", DOUBLE()},
        {"l_discount", DOUBLE()},
        {"l_quantity", DOUBLE()}});
+
   auto partType = ROW(
       {{"p_partkey", BIGINT()},
        {"p_brand", VARCHAR()},
@@ -433,8 +434,23 @@ TEST_F(PlanTest, filterBreakup) {
     auto plan = toSingleNodePlan(logicalPlan, connector);
     auto matcher =
         core::PlanMatcherBuilder()
-            .hiveScan("lineitem", std::move(lineitemFilters))
-            .hashJoin(core::PlanMatcherBuilder().hiveScan("part", {}).build())
+            .hiveScan(
+                "lineitem",
+                std::move(lineitemFilters),
+                // TODO Fix this plan. Compact the filter to between(1, 30) and
+                // push down as subfield filter.
+                "\"or\"(l_quantity >= 20.0 AND l_quantity <= 30.0, "
+                "   \"or\"(l_quantity >= 1.0 AND l_quantity <= 11.0, "
+                "          l_quantity >= 10.0 AND l_quantity <= 20.0))")
+            .hashJoin(
+                core::PlanMatcherBuilder()
+                    .hiveScan(
+                        "part",
+                        {},
+                        "\"or\"(\"and\"(p_size between 1 and 15, (p_brand = 'Brand#34' AND p_container LIKE 'LG%')), "
+                        "   \"or\"(\"and\"(p_size between 1 and 5, (p_brand = 'Brand#12' AND p_container LIKE 'SM%')), "
+                        "          \"and\"(p_size between 1 and 10, (p_brand = 'Brand#23' AND p_container LIKE 'MED%'))))")
+                    .build())
             .filter()
             .project()
             .partialAggregation()
@@ -475,19 +491,21 @@ TEST_F(PlanTest, unionAll) {
 
   auto logicalPlan = t1.unionAll(t2)
                          .project({"n_regionkey + 1 as rk"})
-                         .filter("cast(rk as integer) in (1, 2, 4, 5)")
+                         .filter("rk % 3 = 1")
                          .build();
 
   {
-    // TODO Verify remaining filters.
-
     auto plan = toSingleNodePlan(logicalPlan, connector);
     auto matcher =
         core::PlanMatcherBuilder()
-            .hiveScan("nation", lte("n_nationkey", 10))
+            .hiveScan(
+                "nation", lte("n_nationkey", 10), "1 = (n_regionkey + 1) % 3")
             .project()
             .localPartition(core::PlanMatcherBuilder()
-                                .hiveScan("nation", gte("n_nationkey", 14))
+                                .hiveScan(
+                                    "nation",
+                                    gte("n_nationkey", 14),
+                                    "1 = (n_regionkey + 1) % 3")
                                 .project()
                                 .build())
             .project()
@@ -505,7 +523,7 @@ TEST_F(PlanTest, unionAll) {
                            .tableScan("nation", nationType)
                            .filter("n_nationkey < 11 or n_nationkey > 13")
                            .project({"n_regionkey + 1 as rk"})
-                           .filter("rk in (1, 2, 4, 5)")
+                           .filter("rk % 3 = 1")
                            .planNode();
 
   checkSame(logicalPlan, referencePlan);
@@ -639,45 +657,49 @@ TEST_F(PlanTest, intersect) {
                 .project({"n_nationkey", "n_regionkey"});
   auto t2 = lp::PlanBuilder(ctx)
                 .tableScan(connectorId, "nation", names)
-                .filter(" n_nationkey > 11 ")
+                .filter("n_nationkey > 11")
                 .project({"n_nationkey", "n_regionkey"});
   auto t3 = lp::PlanBuilder(ctx)
                 .tableScan(connectorId, "nation", names)
-                .filter(" n_nationkey > 12 ")
+                .filter("n_nationkey > 12")
                 .project({"n_nationkey", "n_regionkey"});
 
   auto logicalPlan =
       lp::PlanBuilder(ctx)
           .setOperation(lp::SetOperation::kIntersect, {t1, t2, t3})
           .project({"n_regionkey + 1 as rk"})
-          .filter("cast(rk as integer) in (1, 2, 4, 5)")
+          .filter("rk % 3 = 1")
           .build();
 
   {
     auto plan = toSingleNodePlan(logicalPlan, connector);
-    auto matcher =
-        core::PlanMatcherBuilder()
-            .hiveScan("nation", gte("n_nationkey", 13))
-            .project()
-            .hashJoin(
-                core::PlanMatcherBuilder()
-                    .hiveScan("nation", gte("n_nationkey", 12))
-                    .project()
-                    .hashJoin(
-                        core::PlanMatcherBuilder()
-                            .hiveScan("nation", lte("n_nationkey", 20))
-                            .project()
-                            .build(),
-                        core::JoinType::kRightSemiFilter)
-                    .build(),
-                core::JoinType::kRightSemiFilter)
-            .project()
-            .partialAggregation()
-            .localPartition()
-            .finalAggregation()
-            .project()
-            .project()
-            .build();
+    auto matcher = core::PlanMatcherBuilder()
+                       // TODO Fix this plan to push down (n_regionkey + 1) % 3
+                       // = 1 to all branches of 'intersect'.
+                       .hiveScan("nation", gte("n_nationkey", 13))
+                       .project()
+                       .hashJoin(
+                           core::PlanMatcherBuilder()
+                               .hiveScan("nation", gte("n_nationkey", 12))
+                               .project()
+                               .hashJoin(
+                                   core::PlanMatcherBuilder()
+                                       .hiveScan(
+                                           "nation",
+                                           lte("n_nationkey", 20),
+                                           "1 = (n_regionkey + 1) % 3")
+                                       .project()
+                                       .build(),
+                                   core::JoinType::kRightSemiFilter)
+                               .build(),
+                           core::JoinType::kRightSemiFilter)
+                       .project()
+                       .partialAggregation()
+                       .localPartition()
+                       .finalAggregation()
+                       .project()
+                       .project()
+                       .build();
 
     ASSERT_TRUE(matcher->match(plan));
   }
@@ -686,7 +708,7 @@ TEST_F(PlanTest, intersect) {
                            .tableScan("nation", nationType)
                            .filter("n_nationkey > 12 and n_nationkey < 21")
                            .project({"n_regionkey + 1 as rk"})
-                           .filter("rk in (1, 2, 4, 5)")
+                           .filter("rk % 3 = 1")
                            .planNode();
 
   checkSame(logicalPlan, referencePlan);
@@ -709,43 +731,47 @@ TEST_F(PlanTest, except) {
                 .project({"n_nationkey", "n_regionkey"});
   auto t2 = lp::PlanBuilder(ctx)
                 .tableScan(connectorId, "nation", names)
-                .filter(" n_nationkey > 16 ")
+                .filter("n_nationkey > 16")
                 .project({"n_nationkey", "n_regionkey"});
   auto t3 = lp::PlanBuilder(ctx)
                 .tableScan(connectorId, "nation", names)
-                .filter(" n_nationkey <= 5 ")
+                .filter("n_nationkey <= 5")
                 .project({"n_nationkey", "n_regionkey"});
 
   auto logicalPlan = lp::PlanBuilder(ctx)
                          .setOperation(lp::SetOperation::kExcept, {t1, t2, t3})
                          .project({"n_nationkey", "n_regionkey + 1 as rk"})
-                         .filter("cast(rk as integer) in (1, 2, 4, 5)")
+                         .filter("rk % 3 = 1")
                          .build();
 
   {
     auto plan = toSingleNodePlan(logicalPlan, connector);
-    auto matcher = core::PlanMatcherBuilder()
-                       .hiveScan("nation", lte("n_nationkey", 20))
-                       .project()
-                       .hashJoin(
-                           core::PlanMatcherBuilder()
-                               .hiveScan("nation", gte("n_nationkey", 17))
-                               .project()
-                               .build(),
-                           core::JoinType::kAnti)
-                       .hashJoin(
-                           core::PlanMatcherBuilder()
-                               .hiveScan("nation", lte("n_nationkey", 5))
-                               .project()
-                               .build(),
-                           core::JoinType::kAnti)
-                       .project()
-                       .partialAggregation()
-                       .localPartition()
-                       .finalAggregation()
-                       .project()
-                       .project()
-                       .build();
+    auto matcher =
+        core::PlanMatcherBuilder()
+            .hiveScan(
+                "nation", lte("n_nationkey", 20), "1 = (n_regionkey + 1) % 3")
+            .project()
+            .hashJoin(
+                core::PlanMatcherBuilder()
+                    // TODO Fix this plan to push down (n_regionkey + 1) % 3 = 1
+                    // to all branches of 'except'.
+                    .hiveScan("nation", gte("n_nationkey", 17))
+                    .project()
+                    .build(),
+                core::JoinType::kAnti)
+            .hashJoin(
+                core::PlanMatcherBuilder()
+                    .hiveScan("nation", lte("n_nationkey", 5))
+                    .project()
+                    .build(),
+                core::JoinType::kAnti)
+            .project()
+            .partialAggregation()
+            .localPartition()
+            .finalAggregation()
+            .project()
+            .project()
+            .build();
 
     ASSERT_TRUE(matcher->match(plan));
   }
@@ -754,7 +780,7 @@ TEST_F(PlanTest, except) {
                            .tableScan("nation", nationType)
                            .filter("n_nationkey > 5 and n_nationkey <= 16")
                            .project({"n_nationkey", "n_regionkey + 1 as rk"})
-                           .filter("rk in (1, 2, 4, 5)")
+                           .filter("rk % 3 = 1")
                            .planNode();
 
   checkSame(logicalPlan, referencePlan);

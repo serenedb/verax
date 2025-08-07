@@ -36,7 +36,8 @@ class PlanMatcherBuilder {
 
   PlanMatcherBuilder& hiveScan(
       const std::string& tableName,
-      common::SubfieldFilters subfieldFilters);
+      common::SubfieldFilters subfieldFilters,
+      const std::string& remainingFilter = "");
 
   PlanMatcherBuilder& filter();
 
