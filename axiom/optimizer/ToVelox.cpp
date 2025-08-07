@@ -1142,10 +1142,17 @@ core::PlanNodePtr Optimization::makeValues(const Values& values) {
   // TODO we need to remove unnecessary columns from the output type vectors
   // auto neededOutputType = makeOutputType(values.columns());
 
-  auto valuesNode = std::make_shared<core::ValuesNode>(
-      nextId(),
-      values.valuesTable.values.values(),
-      values.valuesTable.values.repeatTimes());
+  const auto& data = values.valuesTable.values.data();
+  std::vector<RowVectorPtr> data_values;
+  if ([[maybe_unused]] auto* row = std::get_if<std::vector<Variant>>(&data)) {
+    [[maybe_unused]] auto& data_value = data_values.emplace_back();
+    VELOX_NYI("Translate rows from vector<Variant> to RowVector");
+  } else {
+    data_values = std::get<std::vector<RowVectorPtr>>(data);
+  }
+
+  auto valuesNode =
+      std::make_shared<core::ValuesNode>(nextId(), std::move(data_values));
 
   makePredictionAndHistory(valuesNode->id(), &values);
 

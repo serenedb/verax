@@ -130,6 +130,8 @@ class PlanBuilder {
     VELOX_CHECK_NOT_NULL(nameAllocator_);
   }
 
+  PlanBuilder& values(const RowTypePtr& rowType, std::vector<Variant> rows);
+
   PlanBuilder& values(std::vector<RowVectorPtr> values);
 
   /// Equivalent to SELECT col1, col2,.. FROM <tableName>.

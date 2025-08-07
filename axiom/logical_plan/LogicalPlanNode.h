@@ -112,29 +112,20 @@ class LogicalPlanNode {
 /// A table whose content is embedded in the plan.
 class ValuesNode : public LogicalPlanNode {
  public:
-  // TODO Implement such ctor, unfortunately transform from rows to values isn't
-  // trivial and I'm not sure there's any user of this.
   /// @param rowType Output schema. A list of column names and types. All names
   /// must be non-empty and unique.
   /// @param rows A list of rows. Each row is a list of values, one per column.
   /// The number, order and types of columns must match 'rowType'.
-  // ValuesNode(std::string id, RowTypePtr rowType, std::vector<Variant> rows);
+  ValuesNode(std::string id, RowTypePtr rowType, std::vector<Variant> rows);
 
-  ValuesNode(
-      std::string id,
-      std::vector<RowVectorPtr> values,
-      size_t repeatTimes = 1);
+  ValuesNode(std::string id, std::vector<RowVectorPtr> values);
 
   uint64_t cardinality() const {
     return cardinality_;
   }
 
-  const std::vector<RowVectorPtr>& values() const {
-    return values_;
-  }
-
-  size_t repeatTimes() const {
-    return repeatTimes_;
+  const auto& data() const {
+    return data_;
   }
 
   void accept(const PlanNodeVisitor& visitor, PlanNodeVisitorContext& context)
@@ -142,8 +133,7 @@ class ValuesNode : public LogicalPlanNode {
 
  private:
   uint64_t cardinality_ = 0;
-  const std::vector<RowVectorPtr> values_;
-  const size_t repeatTimes_;
+  const std::variant<std::vector<Variant>, std::vector<RowVectorPtr>> data_;
 };
 
 using ValuesNodePtr = std::shared_ptr<const ValuesNode>;
