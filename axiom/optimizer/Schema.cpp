@@ -35,7 +35,7 @@ float Value::byteSize() const {
 std::vector<ColumnCP> SchemaTable::toColumns(
     const std::vector<std::string>& names) {
   std::vector<ColumnCP> columns(names.size());
-  assert(!columns.empty()); // lint
+  VELOX_DCHECK(!columns.empty());
   for (auto i = 0; i < names.size(); ++i) {
     columns[i] = findColumn(name);
   }
@@ -307,7 +307,7 @@ IndexInfo joinCardinality(PlanObjectCP table, CPSpan<Column> keys) {
   VELOX_CHECK(table->type() == PlanType::kDerivedTable);
   auto dt = table->as<DerivedTable>();
   auto distribution = dt->distribution;
-  assert(distribution);
+  VELOX_DCHECK(distribution);
   IndexInfo result;
   result.scanCardinality = distribution->cardinality;
   const ExprVector* groupingKeys = nullptr;

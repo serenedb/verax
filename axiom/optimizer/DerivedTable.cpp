@@ -335,7 +335,7 @@ void DerivedTable::import(
       noImportOfExists = true;
     } else {
       joins.push_back(existsJoin);
-      assert(!existsTables.empty());
+      VELOX_DCHECK(!existsTables.empty());
       tables.push_back(existsTables[0]);
       tableSet.add(existsTables[0]);
       noImportOfExists = true;
@@ -552,7 +552,7 @@ void DerivedTable::importJoinsIntoFirstDt(const DerivedTable* firstDt) {
       continue;
     }
     auto innerKey = importExpr(side.keys[0], outer, inner);
-    assert(innerKey);
+    VELOX_DCHECK(innerKey);
     if (innerKey->containsFunction(FunctionSet::kAggregate)) {
       // If the join key is an aggregate, the join can't be moved below the agg.
       continue;
