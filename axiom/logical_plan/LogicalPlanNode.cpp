@@ -82,7 +82,7 @@ ValuesNode::ValuesNode(
           std::move(id),
           {},
           values.empty() ? ROW({}) : values.front()->rowType()},
-      data_{std::move(values)}{
+      data_{std::move(values)} {
   UniqueNameChecker::check(outputType()->names());
   for (const auto& value : std::get<std::vector<RowVectorPtr>>(data_)) {
     VELOX_USER_CHECK_NOT_NULL(value);
