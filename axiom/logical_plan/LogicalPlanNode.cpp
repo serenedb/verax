@@ -72,6 +72,14 @@ ValuesNode::ValuesNode(
       cardinality_{rows.size()},
       data_{std::move(rows)} {
   UniqueNameChecker::check(outputType()->names());
+
+  for (const auto& row : std::get<std::vector<Variant>>(data_)) {
+    VELOX_USER_CHECK(
+        row.isTypeCompatible(rowType),
+        "Incompatible types: {} vs. {}",
+        row.inferType()->toString(),
+        rowType->toString());
+  }
 }
 
 ValuesNode::ValuesNode(
