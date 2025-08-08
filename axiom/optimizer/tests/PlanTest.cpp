@@ -839,28 +839,30 @@ TEST_F(PlanTest, values) {
 
   const std::vector<std::string>& names = nationType->names();
 
-  auto rowVector = makeRowVector(names, {
-      makeFlatVector<int64_t>({
-          1,
-          2,
-          3,
-      }),
-      makeFlatVector<int64_t>({
-          10,
-          20,
-          30,
-      }),
-      makeFlatVector<StringView>({
-          "nation1",
-          "nation2",
-          "nation3",
-      }),
-      makeFlatVector<StringView>({
-          "comment1",
-          "comment2",
-          "comment3",
-      }),
-  });
+  auto rowVector = makeRowVector(
+      names,
+      {
+          makeFlatVector<int64_t>({
+              1,
+              2,
+              3,
+          }),
+          makeFlatVector<int64_t>({
+              10,
+              20,
+              30,
+          }),
+          makeFlatVector<StringView>({
+              "nation1",
+              "nation2",
+              "nation3",
+          }),
+          makeFlatVector<StringView>({
+              "comment1",
+              "comment2",
+              "comment3",
+          }),
+      });
 
   lp::PlanBuilder::Context ctx;
   auto t1 = lp::PlanBuilder(ctx)
@@ -876,20 +878,71 @@ TEST_F(PlanTest, values) {
                 .filter("n_nationkey <= 5")
                 .project({"n_nationkey", "n_regionkey"});
 
-  auto logicalPlan = lp::PlanBuilder(ctx)
-                         .setOperation(lp::SetOperation::kExcept, {t1, t2, t3})
-                         .project({"n_nationkey", "n_regionkey + 1 as rk"})
-                         .filter("cast(rk as integer) in (1, 2, 4, 5)")
-                         .build();
+  auto logicalPlanExcept =
+      lp::PlanBuilder(ctx)
+          .setOperation(lp::SetOperation::kExcept, {t1, t2, t3})
+          .project({"n_nationkey", "n_regionkey + 1 as rk"})
+          .filter("cast(rk as integer) in (1, 2, 4, 5)")
+          .build();
 
-  auto referencePlan = exec::test::PlanBuilder(pool_.get())
-                           .values({rowVector})
-                           .filter("n_nationkey > 5 and n_nationkey <= 16")
-                           .project({"n_nationkey", "n_regionkey + 1 as rk"})
-                           .filter("rk in (1, 2, 4, 5)")
-                           .planNode();
+  auto referencePlanExcept =
+      exec::test::PlanBuilder(pool_.get())
+          .values({rowVector})
+          .filter("n_nationkey > 5 and n_nationkey <= 16")
+          .project({"n_nationkey", "n_regionkey + 1 as rk"})
+          .filter("rk in (1, 2, 4, 5)")
+          .planNode();
 
-  checkSame(logicalPlan, referencePlan);
+  checkSame(logicalPlanExcept, referencePlanExcept);
+
+  auto logicalPlanJoin = lp::PlanBuilder(ctx)
+                             .values({rowVector})
+                             .filter("n_regionkey < 21")
+                             .project({
+                                 "n_nationkey AS x1",
+                                 "n_regionkey AS x2",
+                                 "n_name AS x3",
+                             })
+                             .join(
+                                 lp::PlanBuilder(ctx)
+                                     .values({rowVector})
+                                     .filter("n_regionkey > 11")
+                                     .project({
+                                         "n_nationkey AS y1",
+                                         "n_regionkey AS y2",
+                                         "n_comment AS y3",
+                                     }),
+                                 "x2 = y2",
+                                 lp::JoinType::kInner)
+                             .project({"x1", "x2", "y3"})
+                             .build();
+
+  auto idGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto referencePlanJoin =
+      exec::test::PlanBuilder(idGenerator, pool_.get())
+          .values({rowVector})
+          .filter("n_regionkey < 21")
+          .project({
+              "n_nationkey AS x1",
+              "n_regionkey AS x2",
+              "n_name AS x3",
+          })
+          .hashJoin(
+              {"x2"},
+              {"y2"},
+              exec::test::PlanBuilder(idGenerator, pool_.get())
+                  .values({rowVector})
+                  .filter("n_regionkey > 11")
+                  .project({
+                      "n_nationkey AS y1",
+                      "n_regionkey AS y2",
+                      "n_comment AS y3",
+                  })
+                  .planNode(),
+              "",
+              {"x1", "x2", "y3"})
+          .planNode();
+  checkSame(logicalPlanJoin, referencePlanJoin);
 }
 } // namespace
 } // namespace facebook::velox::optimizer

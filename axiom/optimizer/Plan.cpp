@@ -1664,15 +1664,14 @@ void Optimization::makeJoins(RelationOpPtr plan, PlanState& state) {
           state.placed.add(table);
           auto columns = indexColumns(downstream, table, index);
 
+          state.columns.unionObjects(columns);
           auto* scan = make<TableScan>(
               nullptr,
               TableScan::outputDistribution(table, index, columns),
               table,
               index,
               index->distribution().cardinality * table->filterSelectivity,
-              columns);
-
-          state.columns.unionObjects(columns);
+              std::move(columns));
           state.addCost(*scan);
           makeJoins(scan, state);
         }
@@ -1689,12 +1688,11 @@ void Optimization::makeJoins(RelationOpPtr plan, PlanState& state) {
           }
         });
 
+        state.columns.unionObjects(columns);
         auto* scan = make<Values>(
             Distribution{DistributionType{}, valuesTable->cardinality(), {}},
             *valuesTable,
             std::move(columns));
-
-        state.columns.unionObjects(columns);
         state.addCost(*scan);
         makeJoins(scan, state);
       } else {

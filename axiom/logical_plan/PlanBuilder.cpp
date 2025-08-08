@@ -44,7 +44,9 @@ PlanBuilder& PlanBuilder::values(
   }
 
   node_ = std::make_shared<ValuesNode>(
-      nextId(), ROW(outputNames, rowType->children()), std::move(rows));
+      nextId(),
+      ROW(std::move(outputNames), rowType->children()),
+      std::move(rows));
 
   return *this;
 }
@@ -62,7 +64,7 @@ PlanBuilder& PlanBuilder::values(const std::vector<RowVectorPtr>& values) {
     outputNames.push_back(newName(name));
     outputMapping_->add(name, outputNames.back());
   }
-  rowType = ROW(outputNames, rowType->children());
+  rowType = ROW(std::move(outputNames), rowType->children());
 
   std::vector<RowVectorPtr> newValues;
   newValues.reserve(values.size());
