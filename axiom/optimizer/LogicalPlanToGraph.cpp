@@ -1044,13 +1044,14 @@ PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode& tableScan) {
 
 PlanObjectP Optimization::makeValuesTable(const lp::ValuesNode& values) {
   auto* valuesTable = make<ValuesTable>(values);
+  valuesTable->cname = newCName("vt");
   logicalPlanLeaves_[&values] = valuesTable;
 
   auto channels = usedChannels(&values);
   const auto& type = values.outputType();
   const auto& names = values.outputType()->names();
   const auto cardinality = valuesTable->cardinality();
-  for (auto i = 0; i < type->size(); ++i) {
+  for (uint32_t i = 0; i < type->size(); ++i) {
     if (std::find(channels.begin(), channels.end(), i) == channels.end()) {
       continue;
     }

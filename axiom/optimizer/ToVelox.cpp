@@ -1143,20 +1143,54 @@ core::PlanNodePtr Optimization::makeValues(
     const Values& values,
     ExecutableFragment& fragment) {
   fragment.width = 1;
-  // TODO we need to remove unnecessary columns from the output type vectors
-  // auto neededOutputType = makeOutputType(values.columns());
+  const auto& newColumns = values.columns();
+  const auto newType = makeOutputType(newColumns);
+  VELOX_DCHECK_EQ(newColumns.size(), newType->size());
 
   const auto& data = values.valuesTable.values.data();
-  std::vector<RowVectorPtr> data_values;
+  std::vector<RowVectorPtr> newValues;
   if ([[maybe_unused]] auto* row = std::get_if<std::vector<Variant>>(&data)) {
-    [[maybe_unused]] auto& data_value = data_values.emplace_back();
+    [[maybe_unused]] auto& newValue = newValues.emplace_back();
     VELOX_NYI("Translate rows from vector<Variant> to RowVector");
   } else {
-    data_values = std::get<std::vector<RowVectorPtr>>(data);
+    const auto& oldValues = std::get<std::vector<RowVectorPtr>>(data);
+    newValues.reserve(oldValues.size());
+
+    VELOX_DCHECK(!oldValues.empty());
+    const auto oldType = oldValues.front()->rowType();
+
+    std::vector<uint32_t> oldColumnIdxs;
+    oldColumnIdxs.reserve(newColumns.size());
+    // TODO: This place and a lot of other that use getChildIdx/etc results to
+    // O(n * m) complexity, so it doesn't work well for large projections
+    // I think it can be better if type will have FlatHashMap<name, index>
+    // instead of parallel to vector of types vector of names
+    for (const auto& column : newColumns) {
+      auto oldColumnIdx = oldType->getChildIdx(column->name());
+      oldColumnIdxs.emplace_back(oldColumnIdx);
+    }
+
+    for (const auto& oldValue : oldValues) {
+      const auto& oldChildren = oldValue->children();
+      std::vector<VectorPtr> newChildren;
+      newChildren.reserve(oldColumnIdxs.size());
+      for (const auto columnIdx : oldColumnIdxs) {
+        newChildren.emplace_back(oldChildren[columnIdx]);
+      }
+
+      auto newValue = std::make_shared<RowVector>(
+          oldValue->pool(),
+          newType,
+          oldValue->nulls(),
+          oldValue->size(),
+          std::move(newChildren),
+          oldValue->getNullCount());
+      newValues.emplace_back(std::move(newValue));
+    }
   }
 
   auto valuesNode =
-      std::make_shared<core::ValuesNode>(nextId(), std::move(data_values));
+      std::make_shared<core::ValuesNode>(nextId(), std::move(newValues));
 
   makePredictionAndHistory(valuesNode->id(), &values);
 

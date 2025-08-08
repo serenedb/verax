@@ -51,12 +51,11 @@ std::string Column::toString() const {
   if (!-opt->cnamesInExpr()) {
     return name_;
   }
-  if (relation_ && relation_->type() == PlanType::kValuesTable) {
-    return name_;
-  }
   Name cname = !relation_ ? ""
       : relation_->type() == PlanType::kTable
       ? relation_->as<BaseTable>()->cname
+      : relation_->type() == PlanType::kValuesTable
+      ? relation_->as<ValuesTable>()->cname
       : relation_->type() == PlanType::kDerivedTable
       ? relation_->as<DerivedTable>()->cname
       : "--";

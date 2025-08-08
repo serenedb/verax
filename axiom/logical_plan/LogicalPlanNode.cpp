@@ -92,8 +92,8 @@ ValuesNode::ValuesNode(std::string id, Values values)
   for (const auto& value : std::get<Values>(data_)) {
     VELOX_USER_CHECK_NOT_NULL(value);
     VELOX_USER_CHECK(
-        *outputType() == *value->type(),
-        "All values should have same types: {} vs. {}",
+        outputType()->equivalent(*value->type()),
+        "All values should have equivalent types: {} vs. {}",
         outputType()->toString(),
         value->type()->toString());
     cardinality_ += value->size();
