@@ -19,7 +19,9 @@
 #include "axiom/logical_plan/ExprApi.h"
 #include "axiom/logical_plan/PlanBuilder.h"
 #include "axiom/optimizer/tests/ParquetTpchTest.h"
+#include "axiom/optimizer/tests/QuerySqlParser.h"
 #include "axiom/optimizer/tests/QueryTestBase.h"
+#include "velox/dwio/common/tests/utils/DataFiles.h"
 #include "velox/exec/tests/utils/TpchQueryBuilder.h"
 
 DEFINE_int32(num_repeats, 1, "Number of repeats for optimization timing");
@@ -93,6 +95,66 @@ class TpchPlanTest : public virtual test::ParquetTpchTest,
     }
   }
 
+  velox::optimizer::test::QuerySqlParser makeQueryParser() {
+    velox::optimizer::test::QuerySqlParser parser(
+        exec::test::kHiveConnectorId, pool());
+
+    auto registerTable = [&](const std::string& name) {
+      auto* table = connector::getConnector(exec::test::kHiveConnectorId)
+                        ->metadata()
+                        ->findTable(name);
+      parser.registerTable(name, table->rowType());
+    };
+
+    registerTable("region");
+    registerTable("nation");
+    registerTable("lineitem");
+    registerTable("orders");
+    registerTable("customer");
+    registerTable("supplier");
+    registerTable("part");
+    registerTable("partsupp");
+
+    return parser;
+  }
+
+  static std::string readSqlFromFile(const std::string& filePath) {
+    auto path = velox::test::getDataFilePath("axiom/optimizer/tests", filePath);
+    std::ifstream inputFile(path, std::ifstream::binary);
+
+    // Find out file size.
+    auto begin = inputFile.tellg();
+    inputFile.seekg(0, std::ios::end);
+    auto end = inputFile.tellg();
+
+    auto fileSize = end - begin;
+    if (fileSize == 0) {
+      return "";
+    }
+
+    // Read the file.
+    std::string sql;
+    sql.resize(fileSize);
+
+    inputFile.seekg(begin);
+    inputFile.read(sql.data(), fileSize);
+    inputFile.close();
+    return sql;
+  }
+
+  void checkTpchSql(int32_t query) {
+    auto parser = makeQueryParser();
+
+    auto sql = readSqlFromFile(fmt::format("tpch.queries/q{}.sql", query));
+    auto logicalPlan = parser.parse(sql);
+
+    auto fragmentedPlan = planVelox(logicalPlan);
+    auto referencePlan = referenceBuilder_->getQueryPlan(query).plan;
+
+    test::TestResult referenceResult;
+    assertSame(referencePlan, fragmentedPlan, &referenceResult);
+  }
+
   std::unique_ptr<HashStringAllocator> allocator_;
   std::unique_ptr<QueryGraphContext> context_;
   std::unique_ptr<exec::test::TpchQueryBuilder> referenceBuilder_;
@@ -119,6 +181,8 @@ TEST_F(TpchPlanTest, q01) {
           .build();
 
   checkTpch(1, logicalPlan);
+
+  checkTpchSql(1);
 }
 
 TEST_F(TpchPlanTest, DISABLED_q02) {
@@ -145,6 +209,8 @@ TEST_F(TpchPlanTest, q03) {
           .build();
 
   checkTpch(3, logicalPlan);
+
+  checkTpchSql(3);
 }
 
 TEST_F(TpchPlanTest, DISABLED_q04) {
@@ -181,6 +247,8 @@ TEST_F(TpchPlanTest, q05) {
           .build();
 
   checkTpch(5, logicalPlan);
+
+  checkTpchSql(5);
 }
 
 TEST_F(TpchPlanTest, q06) {

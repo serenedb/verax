@@ -30,16 +30,13 @@
 #include "axiom/optimizer/SchemaResolver.h"
 #include "axiom/optimizer/VeloxHistory.h"
 #include "axiom/optimizer/connectors/ConnectorSplitSource.h"
+#include "axiom/optimizer/tests/QuerySqlParser.h"
 #include "velox/benchmarks/QueryBenchmarkBase.h"
 #include "velox/exec/PlanNodeStats.h"
-#include "velox/exec/Split.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/exec/tests/utils/LocalExchangeSource.h"
-#include "velox/expression/Expr.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/parse/QueryPlanner.h"
-#include "velox/parse/TypeResolver.h"
 #include "velox/runner/LocalRunner.h"
 #include "velox/serializers/PrestoSerializer.h"
 #include "velox/vector/VectorSaver.h"
@@ -246,60 +243,24 @@ class VeloxRunner : public QueryBenchmarkBase {
         0,
         schemaQueryCtx_->queryConfig().sessionTimezone());
 
-    schema_ = std::make_shared<facebook::velox::optimizer::SchemaResolver>(
-        connector_, "");
+    schema_ = std::make_shared<optimizer::SchemaResolver>(connector_, "");
 
-    planner_ = std::make_unique<core::DuckDbQueryPlanner>(optimizerPool_.get());
+    planner_ = std::make_unique<optimizer::test::QuerySqlParser>(
+        kHiveConnectorId, optimizerPool_.get());
     auto& tables = dynamic_cast<connector::hive::LocalHiveConnectorMetadata*>(
                        connector_->metadata())
                        ->tables();
     for (auto& pair : tables) {
       planner_->registerTable(pair.first, pair.second->rowType());
     }
-    planner_->registerTableScan(
-        [this](
-            const std::string& id,
-            const std::string& name,
-            const RowTypePtr& rowType,
-            const std::vector<std::string>& columnNames) {
-          return toTableScan(id, name, rowType, columnNames);
-        });
-    history_ = std::make_unique<facebook::velox::optimizer::VeloxHistory>();
+
+    history_ = std::make_unique<optimizer::VeloxHistory>();
     history_->updateFromFile(FLAGS_data_path + "/.history");
     executor_ =
         std::make_shared<folly::CPUThreadPoolExecutor>(std::max<int32_t>(
             std::thread::hardware_concurrency() * 2,
             FLAGS_num_workers * FLAGS_num_drivers * 2 + 2));
     spillExecutor_ = std::make_shared<folly::IOThreadPoolExecutor>(4);
-  }
-
-  core::PlanNodePtr toTableScan(
-      const std::string& id,
-      const std::string& name,
-      const RowTypePtr& rowType,
-      const std::vector<std::string>& columnNames) {
-    using namespace connector::hive;
-    auto handle = std::make_shared<HiveTableHandle>(
-        kHiveConnectorId, name, true, common::SubfieldFilters{}, nullptr);
-    connector::ColumnHandleMap assignments;
-
-    auto table = connector_->metadata()->findTable(name);
-    for (auto i = 0; i < rowType->size(); ++i) {
-      auto projectedName = rowType->nameOf(i);
-      auto& columnName = columnNames[i];
-      VELOX_CHECK(
-          table->columnMap().find(columnName) != table->columnMap().end(),
-          "No column {} in {}",
-          columnName,
-          name);
-      assignments[projectedName] = std::make_shared<HiveColumnHandle>(
-          columnName,
-          HiveColumnHandle::ColumnType::kRegular,
-          rowType->childAt(i),
-          rowType->childAt(i));
-    }
-    return std::make_shared<core::TableScanNode>(
-        id, rowType, handle, assignments);
   }
 
   void runInner(
@@ -471,10 +432,9 @@ class VeloxRunner : public QueryBenchmarkBase {
         fmt::format("query_{}", queryCounter_));
 
     // The default Locus for planning is the system and data of 'connector_'.
-    optimizer::Locus locus(connector_->connectorId().c_str(), connector_.get());
-    core::PlanNodePtr plan;
+    logical_plan::LogicalPlanNodePtr plan;
     try {
-      plan = planner_->plan(sql);
+      plan = planner_->parse(sql);
     } catch (std::exception& e) {
       std::cerr << "parse error: " << e.what() << std::endl;
       if (errorString) {
@@ -487,16 +447,15 @@ class VeloxRunner : public QueryBenchmarkBase {
     opts.numDrivers = FLAGS_num_drivers;
     auto allocator =
         std::make_unique<HashStringAllocator>(optimizerPool_.get());
-    auto context =
-        std::make_unique<facebook::velox::optimizer::QueryGraphContext>(
-            *allocator);
-    facebook::velox::optimizer::queryCtx() = context.get();
+    auto context = std::make_unique<optimizer::QueryGraphContext>(*allocator);
+    optimizer::queryCtx() = context.get();
     exec::SimpleExpressionEvaluator evaluator(
         queryCtx.get(), optimizerPool_.get());
     optimizer::PlanAndStats planAndStats;
     try {
-      facebook::velox::optimizer::Schema veraxSchema(
-          "test", schema_.get(), &locus);
+      optimizer::Locus locus(
+          connector_->connectorId().c_str(), connector_.get());
+      optimizer::Schema veraxSchema("test", schema_.get(), &locus);
       optimizer::OptimizerOptions optimizerOpts = {
           .traceFlags = FLAGS_optimizer_trace};
       optimizer::Optimization opt(
@@ -519,14 +478,14 @@ class VeloxRunner : public QueryBenchmarkBase {
       }
       planAndStats = opt.toVeloxPlan(best->op, opts);
     } catch (const std::exception& e) {
-      facebook::velox::optimizer::queryCtx() = nullptr;
+      optimizer::queryCtx() = nullptr;
       std::cerr << "optimizer error: " << e.what() << std::endl;
       if (errorString) {
         *errorString = fmt::format("optimizer error: {}", e.what());
       }
       return nullptr;
     }
-    facebook::velox::optimizer::queryCtx() = nullptr;
+    optimizer::queryCtx() = nullptr;
     RunStats runStats;
     try {
       connector::SplitOptions splitOptions{
@@ -728,8 +687,8 @@ class VeloxRunner : public QueryBenchmarkBase {
   std::shared_ptr<connector::ConnectorQueryCtx> connectorQueryCtx_;
   std::shared_ptr<connector::Connector> connector_;
   std::shared_ptr<optimizer::SchemaResolver> schema_;
-  std::unique_ptr<facebook::velox::optimizer::VeloxHistory> history_;
-  std::unique_ptr<core::DuckDbQueryPlanner> planner_;
+  std::unique_ptr<optimizer::VeloxHistory> history_;
+  std::unique_ptr<optimizer::test::QuerySqlParser> planner_;
   std::unordered_map<std::string, std::string> hiveConfig_;
   std::ofstream* record_{nullptr};
   std::ifstream* check_{nullptr};
