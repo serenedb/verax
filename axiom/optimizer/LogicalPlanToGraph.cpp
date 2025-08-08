@@ -976,19 +976,19 @@ PlanObjectP Optimization::wrapInDt(const lp::LogicalPlanNode& node) {
   return dt;
 }
 
-PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode* tableScan) {
-  const auto* schemaTable = schema_.findTable(tableScan->tableName());
+PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode& tableScan) {
+  const auto* schemaTable = schema_.findTable(tableScan.tableName());
   VELOX_CHECK_NOT_NULL(
-      schemaTable, "Table not found: {}", tableScan->tableName());
+      schemaTable, "Table not found: {}", tableScan.tableName());
 
   auto* baseTable = make<BaseTable>();
   baseTable->cname = toName(fmt::format("t{}", ++nameCounter_));
   baseTable->schemaTable = schemaTable;
-  logicalPlanLeaves_[tableScan] = baseTable;
+  logicalPlanLeaves_[&tableScan] = baseTable;
 
-  auto channels = usedChannels(tableScan);
-  const auto& type = tableScan->outputType();
-  const auto& names = tableScan->columnNames();
+  auto channels = usedChannels(&tableScan);
+  const auto& type = tableScan.outputType();
+  const auto& names = tableScan.columnNames();
   for (auto i = 0; i < type->size(); ++i) {
     if (std::find(channels.begin(), channels.end(), i) == channels.end()) {
       continue;
@@ -1005,16 +1005,16 @@ PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode* tableScan) {
     if (kind == TypeKind::ARRAY || kind == TypeKind::ROW ||
         kind == TypeKind::MAP) {
       BitSet allPaths;
-      if (logicalControlSubfields_.hasColumn(tableScan, i)) {
+      if (logicalControlSubfields_.hasColumn(&tableScan, i)) {
         baseTable->controlSubfields.ids.push_back(column->id());
         allPaths =
-            logicalControlSubfields_.nodeFields[tableScan].resultPaths[i];
+            logicalControlSubfields_.nodeFields[&tableScan].resultPaths[i];
         baseTable->controlSubfields.subfields.push_back(allPaths);
       }
-      if (logicalPayloadSubfields_.hasColumn(tableScan, i)) {
+      if (logicalPayloadSubfields_.hasColumn(&tableScan, i)) {
         baseTable->payloadSubfields.ids.push_back(column->id());
         auto payloadPaths =
-            logicalPayloadSubfields_.nodeFields[tableScan].resultPaths[i];
+            logicalPayloadSubfields_.nodeFields[&tableScan].resultPaths[i];
         baseTable->payloadSubfields.subfields.push_back(payloadPaths);
         allPaths.unionSet(payloadPaths);
       }
@@ -1351,7 +1351,7 @@ PlanObjectP Optimization::makeQueryGraph(
           logical_plan::NodeKindName::toName(node.kind()));
 
     case lp::NodeKind::kTableScan:
-      return makeBaseTable(node.asUnchecked<lp::TableScanNode>());
+      return makeBaseTable(*node.asUnchecked<lp::TableScanNode>());
 
     case lp::NodeKind::kFilter: {
       if (!contains(allowedInDt, PlanType::kFilter)) {

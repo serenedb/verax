@@ -19,7 +19,6 @@
 
 namespace facebook::velox::optimizer {
 
-using namespace facebook::velox;
 // Returns a map from column name to cardinality. Positive means fixed value
 // count, negative means the count is scale * (-count).
 const std::unordered_map<std::string, int64_t>& tpchColumns() {

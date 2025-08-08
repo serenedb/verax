@@ -791,7 +791,7 @@ class Optimization {
   // Converts a table scan into a BaseTable wen building a DerivedTable.
   PlanObjectP makeBaseTable(const core::TableScanNode* tableScan);
 
-  PlanObjectP makeBaseTable(const logical_plan::TableScanNode* tableScan);
+  PlanObjectP makeBaseTable(const logical_plan::TableScanNode& tableScan);
 
   // Decomposes complex type columns into parts projected out as top
   // level if subfield pushdown is on.

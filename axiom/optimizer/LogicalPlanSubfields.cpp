@@ -21,8 +21,6 @@
 
 namespace facebook::velox::optimizer {
 
-using namespace facebook::velox;
-
 namespace lp = facebook::velox::logical_plan;
 
 namespace {
