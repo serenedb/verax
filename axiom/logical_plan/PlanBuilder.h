@@ -132,7 +132,7 @@ class PlanBuilder {
 
   PlanBuilder& values(const RowTypePtr& rowType, std::vector<Variant> rows);
 
-  PlanBuilder& values(std::vector<RowVectorPtr> values);
+  PlanBuilder& values(const std::vector<RowVectorPtr>& values);
 
   /// Equivalent to SELECT col1, col2,.. FROM <tableName>.
   PlanBuilder& tableScan(

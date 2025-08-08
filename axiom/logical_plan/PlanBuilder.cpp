@@ -49,17 +49,41 @@ PlanBuilder& PlanBuilder::values(
   return *this;
 }
 
-PlanBuilder& PlanBuilder::values(std::vector<RowVectorPtr> values) {
+PlanBuilder& PlanBuilder::values(const std::vector<RowVectorPtr>& values) {
   VELOX_USER_CHECK_NULL(node_, "Values node must be the leaf node");
 
   outputMapping_ = std::make_shared<NameMappings>();
 
   auto rowType = values.empty() ? ROW({}) : values.front()->rowType();
+  const auto numColumns = rowType->size();
+  std::vector<std::string> outputNames;
+  outputNames.reserve(numColumns);
   for (const auto& name : rowType->names()) {
-    outputMapping_->add(name, name);
+    outputNames.push_back(newName(name));
+    outputMapping_->add(name, outputNames.back());
+  }
+  rowType = ROW(outputNames, rowType->children());
+
+  std::vector<RowVectorPtr> newValues;
+  newValues.reserve(values.size());
+  for (const auto& value : values) {
+    VELOX_USER_CHECK_NOT_NULL(value);
+    VELOX_USER_CHECK(
+        value->rowType()->equivalent(*rowType),
+        "All values must have the equilent type: {} vs. {}",
+        value->rowType()->toString(),
+        rowType->toString());
+    auto newValue = std::make_shared<RowVector>(
+        value->pool(),
+        rowType,
+        value->nulls(),
+        static_cast<size_t>(value->size()),
+        value->children(),
+        value->getNullCount());
+    newValues.emplace_back(std::move(newValue));
   }
 
-  node_ = std::make_shared<ValuesNode>(nextId(), std::move(values));
+  node_ = std::make_shared<ValuesNode>(nextId(), std::move(newValues));
 
   return *this;
 }
