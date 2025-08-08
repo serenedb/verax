@@ -843,14 +843,14 @@ TEST_F(PlanTest, values) {
       names,
       {
           makeFlatVector<int64_t>({
-              1,
-              2,
-              3,
-          }),
-          makeFlatVector<int64_t>({
               10,
               20,
               30,
+          }),
+          makeFlatVector<int64_t>({
+              1,
+              2,
+              3,
           }),
           makeFlatVector<StringView>({
               "nation1",
@@ -865,6 +865,39 @@ TEST_F(PlanTest, values) {
       });
 
   lp::PlanBuilder::Context ctx;
+
+  const auto connectorId = exec::test::kHiveConnectorId;
+
+  auto idGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+  auto makeLogicalPlan = [&](uint8_t leafType) {
+    auto plan = lp::PlanBuilder(ctx);
+    if (leafType == 0) {
+      plan.tableScan(connectorId, "nation", names);
+    } else {
+      plan.values({rowVector});
+    }
+    return plan;
+  };
+
+  auto makePhysicalPlan = [&](uint8_t leafType) {
+    auto plan = exec::test::PlanBuilder(idGenerator, pool_.get());
+    if (leafType == 0) {
+      plan.tableScan("nation", nationType);
+    } else {
+      plan.values({rowVector});
+    }
+    return plan;
+  };
+
+  struct Combination {
+    uint8_t leafType1 = 0;
+    uint8_t leafType2 = 0;
+    uint8_t leafType3 = 0;
+    uint8_t leafType4 = 0;
+  };
+  std::vector<Combination> combinations;
+
   auto t1 = lp::PlanBuilder(ctx)
                 .values({rowVector})
                 .filter("n_nationkey < 21")
@@ -886,7 +919,7 @@ TEST_F(PlanTest, values) {
           .build();
 
   auto referencePlanExcept =
-      exec::test::PlanBuilder(pool_.get())
+      exec::test::PlanBuilder(idGenerator, pool_.get())
           .values({rowVector})
           .filter("n_nationkey > 5 and n_nationkey <= 16")
           .project({"n_nationkey", "n_regionkey + 1 as rk"})
@@ -895,54 +928,258 @@ TEST_F(PlanTest, values) {
 
   checkSame(logicalPlanExcept, referencePlanExcept);
 
-  auto logicalPlanJoin = lp::PlanBuilder(ctx)
-                             .values({rowVector})
-                             .filter("n_regionkey < 21")
-                             .project({
-                                 "n_nationkey AS x1",
-                                 "n_regionkey AS x2",
-                                 "n_name AS x3",
-                             })
-                             .join(
-                                 lp::PlanBuilder(ctx)
-                                     .values({rowVector})
-                                     .filter("n_regionkey > 11")
-                                     .project({
-                                         "n_nationkey AS y1",
-                                         "n_regionkey AS y2",
-                                         "n_comment AS y3",
-                                     }),
-                                 "x2 = y2",
-                                 lp::JoinType::kInner)
-                             .project({"x1", "x2", "y3"})
-                             .build();
+  combinations.clear();
+  for (uint8_t leafType1 = 0; leafType1 < 2; ++leafType1) {
+    for (uint8_t leafType2 = 0; leafType2 < 2; ++leafType2) {
+      combinations.emplace_back(leafType1, leafType2, 0, 0);
+    }
+  }
+  for (const auto& combination : combinations) {
+    SCOPED_TRACE(fmt::format(
+        "join2: leafType1: {}, leafType2: {}",
+        combination.leafType1,
+        combination.leafType2));
+    auto logicalPlanJoin2 = makeLogicalPlan(combination.leafType1)
+                                .filter("n_regionkey < 3")
+                                .project({
+                                    "n_nationkey AS x1",
+                                    "n_regionkey AS x2",
+                                    "n_name AS x3",
+                                })
+                                .join(
+                                    makeLogicalPlan(combination.leafType2)
+                                        .filter("n_regionkey > 1")
+                                        .project({
+                                            "n_nationkey AS y1",
+                                            "n_regionkey AS y2",
+                                            "n_comment AS y3",
+                                        }),
+                                    "x2 = y2",
+                                    lp::JoinType::kInner)
+                                .project({"x1", "x2", "y3"})
+                                .build();
+    auto referencePlanJoin2 = makePhysicalPlan(combination.leafType1)
+                                  .filter("n_regionkey < 3")
+                                  .project({
+                                      "n_nationkey AS x1",
+                                      "n_regionkey AS x2",
+                                      "n_name AS x3",
+                                  })
+                                  .hashJoin(
+                                      {"x2"},
+                                      {"y2"},
+                                      makePhysicalPlan(combination.leafType2)
+                                          .filter("n_regionkey > 1")
+                                          .project({
+                                              "n_nationkey AS y1",
+                                              "n_regionkey AS y2",
+                                              "n_comment AS y3",
+                                          })
+                                          .planNode(),
+                                      "",
+                                      {"x1", "x2", "y3"})
+                                  .planNode();
+    checkSame(logicalPlanJoin2, referencePlanJoin2);
+  }
 
-  auto idGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto referencePlanJoin =
-      exec::test::PlanBuilder(idGenerator, pool_.get())
-          .values({rowVector})
-          .filter("n_regionkey < 21")
-          .project({
-              "n_nationkey AS x1",
-              "n_regionkey AS x2",
-              "n_name AS x3",
-          })
-          .hashJoin(
-              {"x2"},
-              {"y2"},
-              exec::test::PlanBuilder(idGenerator, pool_.get())
-                  .values({rowVector})
-                  .filter("n_regionkey > 11")
-                  .project({
-                      "n_nationkey AS y1",
-                      "n_regionkey AS y2",
-                      "n_comment AS y3",
-                  })
-                  .planNode(),
-              "",
-              {"x1", "x2", "y3"})
-          .planNode();
-  checkSame(logicalPlanJoin, referencePlanJoin);
+  combinations.clear();
+  for (uint8_t leafType1 = 0; leafType1 < 2; ++leafType1) {
+    for (uint8_t leafType2 = 0; leafType2 < 2; ++leafType2) {
+      for (uint8_t leafType3 = 0; leafType3 < 2; ++leafType3) {
+        combinations.emplace_back(leafType1, leafType2, leafType3, 0);
+      }
+    }
+  }
+  for (const auto& combination : combinations) {
+    SCOPED_TRACE(fmt::format(
+        "join3: leafType1: {}, leafType2: {}, leafType3: {}",
+        combination.leafType1,
+        combination.leafType2,
+        combination.leafType3));
+
+    auto logicalPlanJoin3 =
+        makeLogicalPlan(combination.leafType1)
+            .filter("n_regionkey < 3")
+            .project({
+                "n_nationkey AS x1",
+                "n_regionkey AS x2",
+                "n_name AS x3",
+            })
+            .join(
+                makeLogicalPlan(combination.leafType2)
+                    .filter("n_regionkey < 3")
+                    .project({
+                        "n_nationkey AS y1",
+                        "n_regionkey AS y2",
+                        "n_name AS y3",
+                    })
+                    .join(
+                        makeLogicalPlan(combination.leafType3)
+                            .filter("n_regionkey > 1")
+                            .project({
+                                "n_nationkey AS z1",
+                                "n_regionkey AS z2",
+                                "n_comment AS z3",
+                            }),
+                        "y2 == z2",
+                        lp::JoinType::kInner)
+                    .project({"y1", "y2", "z3"}),
+                "x2 = y2",
+                lp::JoinType::kInner)
+            .project({"x1", "x2", "y1", "z3"})
+            .build();
+
+    auto referencePlanJoin3 =
+        makePhysicalPlan(combination.leafType1)
+            .filter("n_regionkey < 3")
+            .project({
+                "n_nationkey AS x1",
+                "n_regionkey AS x2",
+                "n_name AS x3",
+            })
+            .hashJoin(
+                {"x2"},
+                {"y2"},
+                makePhysicalPlan(combination.leafType2)
+                    .filter("n_regionkey < 3")
+                    .project({
+                        "n_nationkey AS y1",
+                        "n_regionkey AS y2",
+                        "n_name AS y3",
+                    })
+                    .hashJoin(
+                        {"y2"},
+                        {"z2"},
+                        makePhysicalPlan(combination.leafType3)
+                            .filter("n_regionkey > 1")
+                            .project({
+                                "n_nationkey AS z1",
+                                "n_regionkey AS z2",
+                                "n_comment AS z3",
+                            })
+                            .planNode(),
+                        "",
+                        {"y1", "y2", "z3"})
+                    .planNode(),
+                "",
+                {"x1", "x2", "y1", "z3"})
+            .planNode();
+
+    checkSame(logicalPlanJoin3, referencePlanJoin3);
+  }
+
+  combinations.clear();
+  for (uint8_t leafType1 = 0; leafType1 < 2; ++leafType1) {
+    for (uint8_t leafType2 = 0; leafType2 < 2; ++leafType2) {
+      for (uint8_t leafType3 = 0; leafType3 < 2; ++leafType3) {
+        for (uint8_t leafType4 = 0; leafType4 < 2; ++leafType4) {
+          combinations.emplace_back(leafType1, leafType2, leafType3, leafType4);
+        }
+      }
+    }
+  }
+  for (const auto& combination : combinations) {
+    SCOPED_TRACE(fmt::format(
+        "join4: leafType1: {}, leafType2: {}, leafType3: {}, leafType4: {}",
+        combination.leafType1,
+        combination.leafType2,
+        combination.leafType3,
+        combination.leafType4));
+
+    auto logicalPlanJoin4 =
+        makeLogicalPlan(combination.leafType1)
+            .filter("n_regionkey < 3")
+            .project({
+                "n_nationkey AS x1",
+                "n_regionkey AS x2",
+                "n_name AS x3",
+            })
+            .join(
+                makeLogicalPlan(combination.leafType2)
+                    .filter("n_regionkey < 3")
+                    .project({
+                        "n_nationkey AS y1",
+                        "n_regionkey AS y2",
+                        "n_name AS y3",
+                    })
+                    .join(
+                        makeLogicalPlan(combination.leafType3)
+                            .filter("n_regionkey < 3")
+                            .project({
+                                "n_nationkey AS z1",
+                                "n_regionkey AS z2",
+                                "n_name AS z3",
+                            })
+                            .join(
+                                makeLogicalPlan(combination.leafType4)
+                                    .filter("n_regionkey > 1")
+                                    .project({
+                                        "n_nationkey AS w1",
+                                        "n_regionkey AS w2",
+                                        "n_comment AS w3",
+                                    }),
+                                "z2 == w2",
+                                lp::JoinType::kInner)
+                            .project({"z1", "z2", "w3"}),
+                        "y2 == z2",
+                        lp::JoinType::kInner)
+                    .project({"y1", "y2", "z1", "w3"}),
+                "x2 = y2",
+                lp::JoinType::kInner)
+            .project({"x1", "x2", "y1", "z1", "w3"})
+            .build();
+
+    auto referencePlanJoin4 =
+        makePhysicalPlan(combination.leafType1)
+            .filter("n_regionkey < 3")
+            .project({
+                "n_nationkey AS x1",
+                "n_regionkey AS x2",
+                "n_name AS x3",
+            })
+            .hashJoin(
+                {"x2"},
+                {"y2"},
+                makePhysicalPlan(combination.leafType2)
+                    .filter("n_regionkey < 3")
+                    .project({
+                        "n_nationkey AS y1",
+                        "n_regionkey AS y2",
+                        "n_name AS y3",
+                    })
+                    .hashJoin(
+                        {"y2"},
+                        {"z2"},
+                        makePhysicalPlan(combination.leafType3)
+                            .filter("n_regionkey < 3")
+                            .project({
+                                "n_nationkey AS z1",
+                                "n_regionkey AS z2",
+                                "n_name AS z3",
+                            })
+                            .hashJoin(
+                                {"z2"},
+                                {"w2"},
+                                makePhysicalPlan(combination.leafType4)
+                                    .filter("n_regionkey > 1")
+                                    .project({
+                                        "n_nationkey AS w1",
+                                        "n_regionkey AS w2",
+                                        "n_comment AS w3",
+                                    })
+                                    .planNode(),
+                                "",
+                                {"z1", "z2", "w3"})
+                            .planNode(),
+                        "",
+                        {"y1", "y2", "z1", "w3"})
+                    .planNode(),
+                "",
+                {"x1", "x2", "y1", "z1", "w3"})
+            .planNode();
+
+    checkSame(logicalPlanJoin4, referencePlanJoin4);
+  }
 }
 } // namespace
 } // namespace facebook::velox::optimizer
