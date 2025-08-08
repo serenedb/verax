@@ -19,8 +19,6 @@
 
 namespace facebook::velox::optimizer {
 
-using namespace facebook::velox;
-
 namespace {
 template <typename T>
 int64_t integerValueInner(const BaseVector* vector) {

@@ -22,8 +22,6 @@
 
 namespace facebook::velox::optimizer {
 
-using namespace facebook::velox;
-
 namespace {
 const std::string* columnName(const core::TypedExprPtr& expr) {
   if (auto column =

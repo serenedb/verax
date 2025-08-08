@@ -22,8 +22,6 @@
 
 namespace facebook::velox::optimizer {
 
-using namespace facebook::velox;
-
 // Collection of per operation costs for a target system.  The base
 // unit is the time to memcpy a cache line in a large memcpy on one
 // core. This is ~6GB/s, so ~10ns. Other times are expressed as

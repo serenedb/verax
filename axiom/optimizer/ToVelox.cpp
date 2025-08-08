@@ -24,7 +24,6 @@
 
 namespace facebook::velox::optimizer {
 
-using namespace facebook::velox;
 using namespace facebook::velox::exec;
 using namespace facebook::velox::runner;
 
@@ -1038,28 +1037,22 @@ core::PlanNodePtr Optimization::makeFragment(
     ExecutableFragment& fragment,
     std::vector<ExecutableFragment>& stages) {
   switch (op->relType()) {
-    case RelType::kProject: {
+    case RelType::kProject:
       return makeProject(*op->as<Project>(), fragment, stages);
-    }
-    case RelType::kFilter: {
+    case RelType::kFilter:
       return makeFilter(*op->as<Filter>(), fragment, stages);
-    }
-    case RelType::kAggregation: {
+    case RelType::kAggregation:
       return makeAggregation(*op->as<Aggregation>(), fragment, stages);
-    }
-    case RelType::kOrderBy: {
+    case RelType::kOrderBy:
       return makeOrderBy(*op->as<OrderBy>(), fragment, stages);
-    }
     case RelType::kRepartition: {
       std::shared_ptr<core::ExchangeNode> ignore;
       return makeRepartition(*op->as<Repartition>(), fragment, stages, ignore);
     }
-    case RelType::kTableScan: {
+    case RelType::kTableScan:
       return makeScan(*op->as<TableScan>(), fragment, stages);
-    }
-    case RelType::kJoin: {
+    case RelType::kJoin:
       return makeJoin(*op->as<Join>(), fragment, stages);
-    }
     case RelType::kHashBuild:
       return makeFragment(op->input(), fragment, stages);
     case RelType::kUnionAll:
