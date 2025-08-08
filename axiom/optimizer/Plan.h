@@ -20,7 +20,6 @@
 #include "axiom/optimizer/DerivedTable.h"
 #include "axiom/optimizer/RelationOp.h"
 #include "velox/connectors/Connector.h"
-#include "velox/core/PlanNode.h"
 #include "velox/expression/ConstantExpr.h"
 #include "velox/runner/MultiFragmentPlan.h"
 
@@ -125,22 +124,6 @@ struct ResultAccess {
 };
 
 /// PlanNode output columns and function arguments with accessed subfields.
-struct PlanSubfields {
-  std::unordered_map<const core::PlanNode*, ResultAccess> nodeFields;
-  std::unordered_map<const core::ITypedExpr*, ResultAccess> argFields;
-
-  bool hasColumn(const core::PlanNode* node, int32_t ordinal) const {
-    auto it = nodeFields.find(node);
-    if (it == nodeFields.end()) {
-      return false;
-    }
-    return it->second.resultPaths.count(ordinal) != 0;
-  }
-
-  std::string toString() const;
-};
-
-/// PlanNode output columns and function arguments with accessed subfields.
 struct LogicalPlanSubfields {
   std::unordered_map<const logical_plan::LogicalPlanNode*, ResultAccess>
       nodeFields;
@@ -156,14 +139,6 @@ struct LogicalPlanSubfields {
   }
 
   std::string toString() const;
-};
-
-/// Struct for resolving which PlanNode or Lambda defines which
-/// FieldAccessTypedExpr for column and subfield tracking.
-struct ContextSource {
-  const core::PlanNode* planNode{nullptr};
-  const core::CallTypedExpr* call{nullptr};
-  int32_t lambdaOrdinal{-1};
 };
 
 /// Struct for resolving which logical PlanNode or Lambda defines which
@@ -581,16 +556,6 @@ class Optimization {
   static constexpr int32_t kSample = 4;
 
   Optimization(
-      const velox::core::PlanNode& plan,
-      const Schema& schema,
-      History& history,
-      std::shared_ptr<core::QueryCtx> queryCtx,
-      velox::core::ExpressionEvaluator& evaluator,
-      OptimizerOptions opts = OptimizerOptions(),
-      runner::MultiFragmentPlan::Options options =
-          runner::MultiFragmentPlan::Options{.numWorkers = 5, .numDrivers = 5});
-
-  Optimization(
       const logical_plan::LogicalPlanNode& plan,
       const Schema& schema,
       History& history,
@@ -769,8 +734,6 @@ class Optimization {
     return mask & ~(1UL << static_cast<int32_t>(op));
   }
 
-  void initialize();
-
   // Initializes a tree of DerivedTables with JoinEdges from 'plan' given at
   // construction. Sets 'root_' to the root DerivedTable.
   DerivedTableP makeQueryGraph();
@@ -780,10 +743,6 @@ class Optimization {
   // Converts 'plan' to PlanObjects and records join edges into
   // 'currentSelect_'. If 'node' does not match  allowedInDt, wraps 'node' in a
   // new DerivedTable.
-  PlanObjectP makeQueryGraph(
-      const velox::core::PlanNode& node,
-      uint64_t allowedInDt);
-
   PlanObjectP makeQueryGraph(
       const logical_plan::LogicalPlanNode& node,
       uint64_t allowedInDt);
@@ -828,10 +787,6 @@ class Optimization {
   // 'plan'.
   void setDerivedTableOutput(
       DerivedTableP dt,
-      const velox::core::PlanNode& planNode);
-
-  void setDerivedTableOutput(
-      DerivedTableP dt,
       const velox::logical_plan::LogicalPlanNode& planNode);
 
   // Returns a literal from applying 'call' or 'cast' to 'literals'. nullptr if
@@ -859,8 +814,6 @@ class Optimization {
       const core::TypedExprPtr& typedExpr);
 
   // Returns the ordinal positions of actually referenced outputs of 'node'.
-  std::vector<int32_t> usedChannels(const core::PlanNode* node);
-
   std::vector<int32_t> usedChannels(const logical_plan::LogicalPlanNode* node);
 
   // Returns the ordinal position of used arguments for a function call that
@@ -870,27 +823,12 @@ class Optimization {
   std::vector<int32_t> usedArgs(const logical_plan::Expr* call);
 
   void markFieldAccessed(
-      const ContextSource& source,
-      int32_t ordinal,
-      std::vector<Step>& steps,
-      bool isControl,
-      const std::vector<const RowType*>& context,
-      const std::vector<ContextSource>& sources);
-
-  void markFieldAccessed(
       const LogicalContextSource& source,
       int32_t ordinal,
       std::vector<Step>& steps,
       bool isControl,
       const std::vector<const RowType*>& context,
       const std::vector<LogicalContextSource>& sources);
-
-  void markSubfields(
-      const core::ITypedExpr* expr,
-      std::vector<Step>& steps,
-      bool isControl,
-      const std::vector<const RowType*>& context,
-      const std::vector<ContextSource>& sources);
 
   void markSubfields(
       const logical_plan::Expr* expr,
@@ -908,19 +846,11 @@ class Optimization {
     markSubfields(expr.get(), steps, isControl, context, sources);
   }
 
-  void markAllSubfields(const RowType* type, const core::PlanNode* node);
   void markAllSubfields(
       const RowType* type,
       const logical_plan::LogicalPlanNode* node);
 
-  void markControl(const core::PlanNode* node);
-
   void markControl(const logical_plan::LogicalPlanNode* node);
-
-  void markColumnSubfields(
-      const core::PlanNode* node,
-      const std::vector<core::FieldAccessTypedExprPtr>& columns,
-      int32_t source);
 
   void markColumnSubfields(
       const logical_plan::LogicalPlanNodePtr& source,
@@ -984,15 +914,7 @@ class Optimization {
   // c[1][1][0]. Suppose that the subfield projections are [1][1] =
   // xx. Then c[1] resolves to nullptr,c[1][1] to xx and c[1][1][1]
   // resolves to xx[1]. If no subfield projections, c[1][1] is c[1][1] etc.
-  std::optional<ExprCP> translateSubfield(const core::TypedExprPtr& expr);
-
   std::optional<ExprCP> translateSubfield(const logical_plan::ExprPtr& expr);
-
-  void getExprForField(
-      const core::FieldAccessTypedExpr* expr,
-      core::TypedExprPtr& resultExpr,
-      ColumnCP& resultColumn,
-      const core::PlanNode*& context);
 
   void getExprForField(
       const logical_plan::Expr* expr,
@@ -1093,8 +1015,6 @@ class Optimization {
   // DerivedTable. Done for joins to the right of non-inner joins,
   // group bys as non-top operators, whenever descendents of 'node'
   // are not freely reorderable with its parents' descendents.
-  PlanObjectP wrapInDt(const velox::core::PlanNode& node);
-
   PlanObjectP wrapInDt(const logical_plan::LogicalPlanNode& node);
 
   DerivedTableP newDt();
@@ -1303,12 +1223,6 @@ class Optimization {
       const PlanObjectSet& placed,
       const PlanObjectSet& extraColumns);
 
-  PlanObjectCP findLeaf(const core::PlanNode* node) {
-    auto* leaf = planLeaves_[node];
-    VELOX_CHECK_NOT_NULL(leaf);
-    return leaf;
-  }
-
   PlanObjectCP findLeaf(const logical_plan::LogicalPlanNode* node) {
     auto* leaf = logicalPlanLeaves_[node];
     VELOX_CHECK_NOT_NULL(leaf);
@@ -1319,10 +1233,8 @@ class Optimization {
 
   OptimizerOptions opts_;
 
-  const logical_plan::LogicalPlanNode* logicalPlan_{nullptr};
-
   // Top level plan to optimize.
-  const velox::core::PlanNode* inputPlan_{nullptr};
+  const logical_plan::LogicalPlanNode* logicalPlan_{nullptr};
 
   // Source of historical cost/cardinality information.
   History& history_;
@@ -1335,8 +1247,6 @@ class Optimization {
   DerivedTableP currentSelect_;
 
   // Source PlanNode when inside addProjection() or 'addFilter().
-  const core::PlanNode* exprSource_{nullptr};
-
   const logical_plan::LogicalPlanNode* logicalExprSource_{nullptr};
 
   // Maps names in project noes of 'inputPlan_' to deduplicated Exprs.
@@ -1388,13 +1298,6 @@ class Optimization {
 
   // Column and subfield access info for filters, joins, grouping and other
   // things affecting result row selection.
-  PlanSubfields controlSubfields_;
-
-  // Column and subfield info for items that only affect column values.
-  PlanSubfields payloadSubfields_;
-
-  // Column and subfield access info for filters, joins, grouping and other
-  // things affecting result row selection.
   LogicalPlanSubfields logicalControlSubfields_;
 
   // Column and subfield info for items that only affect column values.
@@ -1442,7 +1345,6 @@ class Optimization {
   velox::RowTypePtr aggFinalType_;
 
   // Map from leaf PlanNode to corresponding PlanObject
-  std::unordered_map<const core::PlanNode*, PlanObjectCP> planLeaves_;
   std::unordered_map<const logical_plan::LogicalPlanNode*, PlanObjectCP>
       logicalPlanLeaves_;
 

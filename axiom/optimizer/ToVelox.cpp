@@ -259,6 +259,68 @@ bool Optimization::isMapAsStruct(Name table, Name column) {
       it->second.end());
 }
 
+namespace {
+
+template <typename T>
+core::TypedExprPtr makeKey(const TypePtr& type, T v) {
+  return std::make_shared<core::ConstantTypedExpr>(type, variant(v));
+}
+} // namespace
+
+core::TypedExprPtr stepToGetter(Step step, core::TypedExprPtr arg) {
+  switch (step.kind) {
+    case StepKind::kField: {
+      if (step.field) {
+        auto& type = arg->type()->childAt(
+            arg->type()->as<TypeKind::ROW>().getChildIdx(step.field));
+        return std::make_shared<core::FieldAccessTypedExpr>(
+            type, arg, step.field);
+      } else {
+        auto& type = arg->type()->childAt(step.id);
+        return std::make_shared<core::DereferenceTypedExpr>(type, arg, step.id);
+      }
+    }
+    case StepKind::kSubscript: {
+      auto& type = arg->type();
+      if (type->kind() == TypeKind::MAP) {
+        core::TypedExprPtr key;
+        switch (type->as<TypeKind::MAP>().childAt(0)->kind()) {
+          case TypeKind::VARCHAR:
+            key = makeKey(VARCHAR(), step.field);
+            break;
+          case TypeKind::BIGINT:
+            key = makeKey<int64_t>(BIGINT(), step.id);
+            break;
+          case TypeKind::INTEGER:
+            key = makeKey<int32_t>(INTEGER(), step.id);
+            break;
+          case TypeKind::SMALLINT:
+            key = makeKey<int16_t>(SMALLINT(), step.id);
+            break;
+          case TypeKind::TINYINT:
+            key = makeKey<int8_t>(TINYINT(), step.id);
+            break;
+          default:
+            VELOX_FAIL("Unsupported key type");
+        }
+
+        return std::make_shared<core::CallTypedExpr>(
+            type->as<TypeKind::MAP>().childAt(1),
+            std::vector<core::TypedExprPtr>{arg, key},
+            "subscript");
+      }
+      return std::make_shared<core::CallTypedExpr>(
+          type->childAt(0),
+          std::vector<core::TypedExprPtr>{
+              arg, makeKey<int32_t>(INTEGER(), step.id)},
+          "subscript");
+    }
+
+    default:
+      VELOX_NYI();
+  }
+}
+
 core::TypedExprPtr Optimization::pathToGetter(
     ColumnCP column,
     PathCP path,

@@ -944,7 +944,7 @@ void Optimization::translateJoin(const lp::JoinNode& join) {
 
 DerivedTableP Optimization::newDt() {
   auto* dt = make<DerivedTable>();
-  dt->cname = toName(fmt::format("dt{}", ++nameCounter_));
+  dt->cname = newCName("dt");
   return dt;
 }
 
@@ -982,7 +982,7 @@ PlanObjectP Optimization::makeBaseTable(const lp::TableScanNode& tableScan) {
       schemaTable, "Table not found: {}", tableScan.tableName());
 
   auto* baseTable = make<BaseTable>();
-  baseTable->cname = toName(fmt::format("t{}", ++nameCounter_));
+  baseTable->cname = newCName("t");
   baseTable->schemaTable = schemaTable;
   logicalPlanLeaves_[&tableScan] = baseTable;
 

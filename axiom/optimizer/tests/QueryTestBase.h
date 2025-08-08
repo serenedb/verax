@@ -21,7 +21,6 @@
 #include "axiom/optimizer/SchemaResolver.h"
 #include "axiom/optimizer/VeloxHistory.h"
 #include "velox/exec/tests/utils/LocalRunnerTestBase.h"
-#include "velox/parse/QueryPlanner.h"
 #include "velox/runner/LocalRunner.h"
 
 DECLARE_string(history_save_path);
@@ -54,10 +53,6 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
   /// Reads the data directory and picks up new tables.
   void tablesCreated();
 
-  TestResult runSql(const std::string& sql);
-
-  TestResult runVelox(const core::PlanNodePtr& plan);
-
   TestResult runVelox(const logical_plan::LogicalPlanNodePtr& plan);
 
   TestResult runFragmentedPlan(optimizer::PlanAndStats& plan);
@@ -68,27 +63,13 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
       optimizer::PlanAndStats& experiment,
       TestResult* referenceReturn = nullptr);
 
-  optimizer::PlanAndStats planSql(
-      const std::string& sql,
-      std::string* planString = nullptr);
-
-  optimizer::PlanAndStats planVelox(
-      const core::PlanNodePtr& plan,
-      std::string* planString = nullptr);
-
   optimizer::PlanAndStats planVelox(
       const logical_plan::LogicalPlanNodePtr& plan,
       std::string* planString = nullptr);
 
   std::shared_ptr<core::QueryCtx> getQueryCtx();
 
-  std::string veloxString(const std::string& sql);
-
   std::string veloxString(const runner::MultiFragmentPlanPtr& plan);
-
-  core::DuckDbQueryPlanner& planner() {
-    return *planner_;
-  }
 
   static VeloxHistory& suiteHistory() {
     return *suiteHistory_;
@@ -120,7 +101,7 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
   std::shared_ptr<connector::ConnectorQueryCtx> connectorQueryCtx_;
   std::shared_ptr<connector::Connector> connector_;
   std::unique_ptr<velox::optimizer::VeloxHistory> history_;
-  std::unique_ptr<core::DuckDbQueryPlanner> planner_;
+
   inline static int32_t queryCounter_{0};
   inline static std::unique_ptr<VeloxHistory> suiteHistory_;
 };

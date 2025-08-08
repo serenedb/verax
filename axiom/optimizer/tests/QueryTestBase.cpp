@@ -133,18 +133,6 @@ void QueryTestBase::tablesCreated() {
       connector_->metadata());
   VELOX_CHECK_NOT_NULL(metadata);
   metadata->reinitialize();
-  planner_ = std::make_unique<core::DuckDbQueryPlanner>(optimizerPool_.get());
-  auto& tables = metadata->tables();
-  for (auto& pair : tables) {
-    planner_->registerTable(pair.first, pair.second->rowType());
-  }
-  planner_->registerTableScan([this](
-                                  const std::string& id,
-                                  const std::string& name,
-                                  const RowTypePtr& rowType,
-                                  const std::vector<std::string>& columnNames) {
-    return toTableScan(id, name, rowType, columnNames);
-  });
 }
 
 core::PlanNodePtr QueryTestBase::toTableScan(
@@ -178,15 +166,6 @@ core::PlanNodePtr QueryTestBase::toTableScan(
   }
   return std::make_shared<core::TableScanNode>(
       id, rowType, handle, assignments);
-}
-
-TestResult QueryTestBase::runSql(const std::string& sql) {
-  TestResult result;
-  auto planAndStats = planSql(sql, &result.planString);
-  if (!planAndStats.plan) {
-    return result;
-  }
-  return runFragmentedPlan(planAndStats);
 }
 
 namespace {
@@ -226,13 +205,6 @@ TestResult QueryTestBase::runFragmentedPlan(
   // Next query will need a different one.
   queryCtx_.reset();
   return result;
-}
-
-optimizer::PlanAndStats QueryTestBase::planSql(
-    const std::string& sql,
-    std::string* planString) {
-  core::PlanNodePtr plan = planner_->plan(sql);
-  return planVelox(plan, planString);
 }
 
 std::shared_ptr<core::QueryCtx> QueryTestBase::getQueryCtx() {
@@ -294,24 +266,9 @@ optimizer::PlanAndStats QueryTestBase::planFromTree(
 }
 
 optimizer::PlanAndStats QueryTestBase::planVelox(
-    const core::PlanNodePtr& plan,
-    std::string* planString) {
-  return planFromTree(plan, planString);
-}
-
-optimizer::PlanAndStats QueryTestBase::planVelox(
     const logical_plan::LogicalPlanNodePtr& plan,
     std::string* planString) {
   return planFromTree(plan, planString);
-}
-
-TestResult QueryTestBase::runVelox(const core::PlanNodePtr& plan) {
-  TestResult result;
-  auto fragmentedPlan = planVelox(plan, &result.planString);
-  if (!fragmentedPlan.plan) {
-    return result;
-  }
-  return runFragmentedPlan(fragmentedPlan);
 }
 
 TestResult QueryTestBase::runVelox(
@@ -322,12 +279,6 @@ TestResult QueryTestBase::runVelox(
     return result;
   }
   return runFragmentedPlan(fragmentedPlan);
-}
-
-std::string QueryTestBase::veloxString(const std::string& sql) {
-  auto plan = planSql(sql);
-  VELOX_CHECK_NOT_NULL(plan.plan);
-  return veloxString(plan.plan);
 }
 
 std::string QueryTestBase::veloxString(

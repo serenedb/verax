@@ -76,10 +76,6 @@ class LogicalSubfieldTest : public QueryTestBase,
   }
 
   void declareGenies() {
-    auto genieType = makeGenieType();
-    std::vector<TypePtr> genieArgs = genieType->children();
-    planner().registerScalarFunction("genie", genieArgs, genieType);
-    planner().registerScalarFunction("exploding_genie", genieArgs, genieType);
     registerGenieUdfs();
 
     auto metadata = std::make_unique<FunctionMetadata>();
