@@ -789,7 +789,7 @@ using AggregationP = Aggregation*;
 
 /// Wraps an Aggregation RelationOp. This gives the aggregation a PlanObject id
 struct AggregationPlan : public PlanObject {
-  AggregationPlan(AggregationP agg)
+  explicit AggregationPlan(AggregationP agg)
       : PlanObject(PlanType::kAggregation), aggregation(agg) {}
 
   AggregationP aggregation;
