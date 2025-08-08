@@ -81,7 +81,8 @@ std::vector<common::Subfield> columnSubfields(BaseTableCP table, int32_t id) {
 }
 
 RelationOpPtr addGather(const RelationOpPtr& op) {
-  if (op->distribution().distributionType.isGather) {
+  if (op->distribution().distributionType.isGather ||
+      !op->distribution().distributionType.isParallel) {
     return op;
   }
   if (op->relType() == RelType::kOrderBy) {

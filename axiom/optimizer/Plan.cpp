@@ -754,7 +754,7 @@ uint32_t position(const V& exprs, Getter getter, const Expr& expr) {
 
 RelationOpPtr repartitionForAgg(const RelationOpPtr& plan, PlanState& state) {
   // No shuffle if all grouping keys are in partitioning.
-  if (isSingleWorker()) {
+  if (isSingleWorker() || !plan->distribution().distributionType.isParallel) {
     return plan;
   }
   bool shuffle = false;
@@ -891,7 +891,8 @@ RelationOpPtr repartitionForIndex(
     const ExprVector& lookupValues,
     const RelationOpPtr& plan,
     PlanState& state) {
-  if (isSingleWorker() || isIndexColocated(info, lookupValues, plan)) {
+  if (isSingleWorker() || !plan->distribution().distributionType.isParallel ||
+      isIndexColocated(info, lookupValues, plan)) {
     return plan;
   }
   ExprVector keyExprs;
@@ -1087,6 +1088,8 @@ void Optimization::joinByHash(
   auto memoKey = MemoKey{
       candidate.tables[0], buildColumns, buildTables, candidate.existences};
   PlanObjectSet empty;
+  const bool canBePartitioned =
+      !isSingle_ && plan->distribution().distributionType.isParallel;
   bool needsShuffle = false;
   auto buildPlan = makePlan(
       memoKey,
@@ -1105,7 +1108,7 @@ void Optimization::joinByHash(
     state.placed.unionSet(buildTables);
   }
   PlanState buildState(state.optimization, state.dt, buildPlan);
-  bool partitionByProbe = !isSingle_ && !partKeys.empty();
+  const bool partitionByProbe = canBePartitioned && !partKeys.empty();
   RelationOpPtr buildInput = buildPlan->op;
   RelationOpPtr probeInput = plan;
   if (partitionByProbe) {
@@ -1122,7 +1125,7 @@ void Optimization::joinByHash(
       buildInput = shuffleTemp;
     }
   } else if (
-      !isSingle_ && candidate.join->isBroadcastableType() &&
+      canBePartitioned && candidate.join->isBroadcastableType() &&
       isBroadcastableSize(buildPlan, state)) {
     auto* broadcast = make<Repartition>(
         buildInput,
@@ -1131,11 +1134,11 @@ void Optimization::joinByHash(
         buildInput->columns());
     buildState.addCost(*broadcast);
     buildInput = broadcast;
-  } else {
+  } else if (canBePartitioned) {
     // The probe gets shuffled to align with build. If build is not partitioned
     // on its keys, shuffle the build too.
     auto buildPart = joinKeyPartition(buildInput, build.keys);
-    if (!isSingle_ && buildPart.empty()) {
+    if (buildPart.empty()) {
       // The build is not aligned on join keys.
       Distribution buildDist(
           plan->distribution().distributionType,
@@ -1163,12 +1166,10 @@ void Optimization::joinByHash(
         probeInput->distribution().distributionType,
         probeInput->resultCardinality(),
         std::move(distCols));
-    if (!isSingle_) {
-      auto* probeShuffle =
-          make<Repartition>(plan, std::move(probeDist), plan->columns());
-      state.addCost(*probeShuffle);
-      probeInput = probeShuffle;
-    }
+    auto* probeShuffle =
+        make<Repartition>(plan, std::move(probeDist), plan->columns());
+    state.addCost(*probeShuffle);
+    probeInput = probeShuffle;
   }
   auto* buildOp =
       make<HashBuild>(buildInput, ++buildCounter_, build.keys, buildPlan);
@@ -1270,6 +1271,8 @@ void Optimization::joinByHashRight(
   auto memoKey = MemoKey{
       candidate.tables[0], probeColumns, probeTables, candidate.existences};
   PlanObjectSet empty;
+  const bool canBePartitioned =
+      !isSingle_ && plan->distribution().distributionType.isParallel;
   bool needsShuffle = false;
   auto probePlan = makePlan(
       memoKey,
@@ -1282,36 +1285,36 @@ void Optimization::joinByHashRight(
 
   RelationOpPtr probeInput = probePlan->op;
   RelationOpPtr buildInput = plan;
-  // The build gets shuffled to align with probe. If probe is not partitioned
-  // on its keys, shuffle the probe too.
-  auto probePart = joinKeyPartition(probeInput, probe.keys);
-  if (!isSingle_ && probePart.empty()) {
-    Distribution probeDist(
-        buildInput->distribution().distributionType,
-        probeInput->resultCardinality(),
-        probe.keys);
-    auto* probeShuffle =
-        make<Repartition>(probeInput, probeDist, probeInput->columns());
-    probeState.addCost(*probeShuffle);
-    probeInput = probeShuffle;
-  }
-  ExprVector buildPartCols;
-  for (size_t i = 0; i < probe.keys.size(); ++i) {
-    auto key = probe.keys[i];
-    auto nthKey = position(probeInput->distribution().partition, *key);
-    if (nthKey != kNotFound) {
-      if (buildPartCols.size() <= nthKey) {
-        buildPartCols.resize(nthKey + 1);
-      }
-      VELOX_DCHECK(isSingle_ || !buildPartCols.empty());
-      buildPartCols[nthKey] = build.keys[i];
+  if (canBePartitioned) {
+    // The build gets shuffled to align with probe. If probe is not partitioned
+    // on its keys, shuffle the probe too.
+    auto probePart = joinKeyPartition(probeInput, probe.keys);
+    if (probePart.empty()) {
+      Distribution probeDist(
+          buildInput->distribution().distributionType,
+          probeInput->resultCardinality(),
+          probe.keys);
+      auto* probeShuffle =
+          make<Repartition>(probeInput, probeDist, probeInput->columns());
+      probeState.addCost(*probeShuffle);
+      probeInput = probeShuffle;
     }
-  }
-  Distribution buildDist(
-      probeInput->distribution().distributionType,
-      buildInput->resultCardinality(),
-      std::move(buildPartCols));
-  if (!isSingle_) {
+    ExprVector buildPartCols;
+    for (size_t i = 0; i < probe.keys.size(); ++i) {
+      auto key = probe.keys[i];
+      auto nthKey = position(probeInput->distribution().partition, *key);
+      if (nthKey != kNotFound) {
+        if (buildPartCols.size() <= nthKey) {
+          buildPartCols.resize(nthKey + 1);
+        }
+        VELOX_DCHECK(isSingle_ || !buildPartCols.empty());
+        buildPartCols[nthKey] = build.keys[i];
+      }
+    }
+    Distribution buildDist(
+        probeInput->distribution().distributionType,
+        buildInput->resultCardinality(),
+        std::move(buildPartCols));
     auto* buildShuffle =
         make<Repartition>(plan, std::move(buildDist), plan->columns());
     state.addCost(*buildShuffle);
@@ -1690,7 +1693,13 @@ void Optimization::makeJoins(RelationOpPtr plan, PlanState& state) {
 
         state.columns.unionObjects(columns);
         auto* scan = make<Values>(
-            Distribution{DistributionType{}, valuesTable->cardinality(), {}},
+            Distribution{
+                DistributionType{
+                    .isParallel = false,
+                },
+                valuesTable->cardinality(),
+                {},
+            },
             *valuesTable,
             std::move(columns));
         state.addCost(*scan);
