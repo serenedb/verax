@@ -26,6 +26,7 @@
 #include "velox/dwio/dwrf/RegisterDwrfReader.h"
 #include "velox/dwio/parquet/RegisterParquetReader.h"
 
+#include "axiom/logical_plan/PlanPrinter.h"
 #include "axiom/optimizer/Plan.h"
 #include "axiom/optimizer/SchemaResolver.h"
 #include "axiom/optimizer/VeloxHistory.h"
@@ -41,34 +42,11 @@
 #include "velox/serializers/PrestoSerializer.h"
 #include "velox/vector/VectorSaver.h"
 
-using namespace facebook::velox;
-using namespace facebook::velox::exec;
-using namespace facebook::velox::runner;
-using namespace facebook::velox::exec::test;
-using namespace facebook::velox::dwio::common;
-
 namespace {
 static bool notEmpty(const char* /*flagName*/, const std::string& value) {
   return !value.empty();
 }
 
-int32_t printResults(const std::vector<RowVectorPtr>& results) {
-  int32_t numRows = 0;
-  std::cout << "Results:" << std::endl;
-  bool printType = true;
-  for (const auto& vector : results) {
-    // Print RowType only once.
-    if (printType) {
-      std::cout << vector->type()->asRow().toString() << std::endl;
-      printType = false;
-    }
-    for (vector_size_t i = 0; i < vector->size(); ++i) {
-      std::cout << vector->toString(i) << std::endl;
-      ++numRows;
-    }
-  }
-  return numRows;
-}
 } // namespace
 
 DEFINE_string(
@@ -82,9 +60,13 @@ DECLARE_int32(ssd_checkpoint_interval_gb);
 
 DEFINE_int32(optimizer_trace, 0, "Optimizer trace level");
 
+DEFINE_bool(print_logical_plan, false, "Print logical plan (optimizer input)");
+
 DEFINE_bool(print_plan, false, "Print optimizer results");
 
 DEFINE_bool(print_short_plan, false, "Print one line plan from optimizer.");
+
+DEFINE_bool(print_velox_plan, false, "Print executable Velox plan");
 
 DEFINE_bool(print_stats, false, "print statistics");
 DECLARE_bool(include_custom_stats);
@@ -118,11 +100,20 @@ DEFINE_string(
 
 DEFINE_validator(data_path, &notEmpty);
 
+DEFINE_bool(
+    check_test_flag_combinations,
+    true,
+    "Check that all runs in test_flags_file sweep produce the same result");
+
+using namespace facebook::velox;
+
+namespace axiom {
+
 const char* helpText =
     "Velox Interactive SQL\n"
     "\n"
     "Type SQL and end with ';'.\n"
-    "To set a flag, type 'flag <gflag_name> = <valu>;' Leave a space on either side of '='.\n"
+    "To set a flag, type 'flag <gflag_name> = <value>;' Leave a space on either side of '='.\n"
     "\n"
     "Useful flags:\n"
     "\n"
@@ -130,21 +121,22 @@ const char* helpText =
     "\n"
     "num_drivers - Specifies the parallelism for workers. This many threads per pipeline per worker.\n"
     "\n"
+    "print_logical_plan - Prints logical plan (input to the optimizer)r.\n"
+    "\n"
     "print_short_plan - Prints a one line summary of join order.\n"
     "\n"
     "print_plan - Prints optimizer best plan with per operator cardinalities and costs.\n"
+    "\n"
+    "print_velox_plan - Prints executable Velox plan.\n"
     "\n"
     "print_stats - Prints the Velox stats of after execution. Annotates operators with predicted and acttual output cardinality.\n"
     "\n"
     "include_custom_stats - Prints per operator runtime stats.\n";
 
-DEFINE_bool(
-    check_test_flag_combinations,
-    true,
-    "Check that all runs in test_flags_file sweep produce the same result");
-
 class VeloxRunner : public QueryBenchmarkBase {
  public:
+  static const std::string kHiveConnectorId;
+
   void initialize() {
     if (FLAGS_cache_gb) {
       memory::MemoryManagerOptions options;
@@ -154,22 +146,9 @@ class VeloxRunner : public QueryBenchmarkBase {
       options.useMmapArena = true;
       options.mmapArenaCapacityRatio = 1;
       memory::MemoryManager::testingSetInstance(options);
-      std::unique_ptr<cache::SsdCache> ssdCache;
-      if (FLAGS_ssd_cache_gb) {
-        constexpr int32_t kNumSsdShards = 16;
-        cacheExecutor_ =
-            std::make_unique<folly::IOThreadPoolExecutor>(kNumSsdShards);
-        const cache::SsdCache::Config config(
-            FLAGS_ssd_path,
-            static_cast<uint64_t>(FLAGS_ssd_cache_gb) << 30,
-            kNumSsdShards,
-            cacheExecutor_.get(),
-            static_cast<uint64_t>(FLAGS_ssd_checkpoint_interval_gb) << 30);
-        ssdCache = std::make_unique<cache::SsdCache>(config);
-      }
 
       cache_ = cache::AsyncDataCache::create(
-          memory::memoryManager()->allocator(), std::move(ssdCache));
+          memory::memoryManager()->allocator(), setupSsdCache());
       cache::AsyncDataCache::setInstance(cache_.get());
     } else {
       memory::MemoryManagerOptions options;
@@ -179,12 +158,12 @@ class VeloxRunner : public QueryBenchmarkBase {
     rootPool_ = memory::memoryManager()->addRootPool("velox_sql");
 
     optimizerPool_ = rootPool_->addLeafChild("optimizer");
-    schemaPool_ = rootPool_->addLeafChild("schema");
     checkPool_ = rootPool_->addLeafChild("check");
 
     functions::prestosql::registerAllScalarFunctions();
     aggregate::prestosql::registerAllAggregateFunctions();
     parse::registerTypeResolver();
+
     filesystems::registerLocalFileSystem();
     parquet::registerParquetReaderFactory();
     dwrf::registerDwrfReaderFactory();
@@ -194,7 +173,43 @@ class VeloxRunner : public QueryBenchmarkBase {
     if (!isRegisteredNamedVectorSerde(VectorSerde::Kind::kPresto)) {
       serializer::presto::PrestoVectorSerde::registerNamedVectorSerde();
     }
+
+    registerHiveConnector();
+
+    schema_ = std::make_shared<optimizer::SchemaResolver>(connector_, "");
+
+    parser_ = setupQueryParser();
+
+    history_ = std::make_unique<optimizer::VeloxHistory>();
+    history_->updateFromFile(FLAGS_data_path + "/.history");
+
+    executor_ =
+        std::make_shared<folly::CPUThreadPoolExecutor>(std::max<int32_t>(
+            std::thread::hardware_concurrency() * 2,
+            FLAGS_num_workers * FLAGS_num_drivers * 2 + 2));
+    spillExecutor_ = std::make_shared<folly::IOThreadPoolExecutor>(4);
+  }
+
+  std::unique_ptr<cache::SsdCache> setupSsdCache() {
+    if (FLAGS_ssd_cache_gb) {
+      constexpr int32_t kNumSsdShards = 16;
+      cacheExecutor_ =
+          std::make_unique<folly::IOThreadPoolExecutor>(kNumSsdShards);
+      const cache::SsdCache::Config config(
+          FLAGS_ssd_path,
+          static_cast<uint64_t>(FLAGS_ssd_cache_gb) << 30,
+          kNumSsdShards,
+          cacheExecutor_.get(),
+          static_cast<uint64_t>(FLAGS_ssd_checkpoint_interval_gb) << 30);
+      return std::make_unique<cache::SsdCache>(config);
+    }
+
+    return nullptr;
+  }
+
+  void registerHiveConnector() {
     ioExecutor_ = std::make_unique<folly::IOThreadPoolExecutor>(8);
+
     std::unordered_map<std::string, std::string> connectorConfig;
     connectorConfig[connector::hive::HiveConfig::kLocalDataPath] =
         FLAGS_data_path;
@@ -209,71 +224,33 @@ class VeloxRunner : public QueryBenchmarkBase {
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
             ->newConnector(kHiveConnectorId, config, ioExecutor_.get());
     connector::registerConnector(connector_);
+  }
 
-    std::unordered_map<std::string, std::shared_ptr<config::ConfigBase>>
-        connectorConfigs;
-    auto copy = hiveConfig_;
-    connectorConfigs[kHiveConnectorId] =
-        std::make_shared<config::ConfigBase>(std::move(copy));
-
-    schemaQueryCtx_ = core::QueryCtx::create(
-        executor_.get(),
-        core::QueryConfig(config_),
-        std::move(connectorConfigs),
-        cache::AsyncDataCache::getInstance(),
-        rootPool_->shared_from_this(),
-        spillExecutor_.get(),
-        "schema");
-    common::SpillConfig spillConfig;
-    common::PrefixSortConfig prefixSortConfig;
-
-    schemaRootPool_ = rootPool_->addAggregateChild("schemaRoot");
-    connectorQueryCtx_ = std::make_shared<connector::ConnectorQueryCtx>(
-        schemaPool_.get(),
-        schemaRootPool_.get(),
-        schemaQueryCtx_->connectorSessionProperties(kHiveConnectorId),
-        &spillConfig,
-        prefixSortConfig,
-        std::make_unique<exec::SimpleExpressionEvaluator>(
-            schemaQueryCtx_.get(), schemaPool_.get()),
-        schemaQueryCtx_->cache(),
-        "scan_for_schema",
-        "schema",
-        "N/a",
-        0,
-        schemaQueryCtx_->queryConfig().sessionTimezone());
-
-    schema_ = std::make_shared<optimizer::SchemaResolver>(connector_, "");
-
-    planner_ = std::make_unique<optimizer::test::QuerySqlParser>(
+  std::unique_ptr<optimizer::test::QuerySqlParser> setupQueryParser() {
+    auto parser = std::make_unique<optimizer::test::QuerySqlParser>(
         kHiveConnectorId, optimizerPool_.get());
     auto& tables = dynamic_cast<connector::hive::LocalHiveConnectorMetadata*>(
                        connector_->metadata())
                        ->tables();
     for (auto& pair : tables) {
-      planner_->registerTable(pair.first, pair.second->rowType());
+      parser->registerTable(pair.first, pair.second->rowType());
     }
 
-    history_ = std::make_unique<optimizer::VeloxHistory>();
-    history_->updateFromFile(FLAGS_data_path + "/.history");
-    executor_ =
-        std::make_shared<folly::CPUThreadPoolExecutor>(std::max<int32_t>(
-            std::thread::hardware_concurrency() * 2,
-            FLAGS_num_workers * FLAGS_num_drivers * 2 + 2));
-    spillExecutor_ = std::make_shared<folly::IOThreadPoolExecutor>(4);
+    return parser;
   }
 
-  void runInner(
-      LocalRunner& runner,
-      std::vector<RowVectorPtr>& result,
+  std::vector<RowVectorPtr> runInner(
+      runner::LocalRunner& runner,
       RunStats& stats) {
+    std::vector<RowVectorPtr> results;
     uint64_t micros = 0;
     {
       struct rusage start;
       getrusage(RUSAGE_SELF, &start);
       MicrosecondTimer timer(&micros);
+
       while (auto rows = runner.next()) {
-        result.push_back(rows);
+        results.push_back(rows);
       }
 
       struct rusage final;
@@ -285,6 +262,8 @@ class VeloxRunner : public QueryBenchmarkBase {
       stats.systemNanos = tvNanos(final.ru_stime) - tvNanos(start.ru_stime);
     }
     stats.micros = micros;
+
+    return results;
   }
 
   /// stores results and plans to 'ref', to be used with --check.
@@ -343,7 +322,7 @@ class VeloxRunner : public QueryBenchmarkBase {
           ++numPlanMismatch_;
           planMiss = true;
         }
-        if (!assertEqualResults(refResult, result)) {
+        if (!exec::test::assertEqualResults(refResult, result)) {
           ++numResultMismatch_;
           resultMiss = true;
         }
@@ -375,8 +354,8 @@ class VeloxRunner : public QueryBenchmarkBase {
     }
   }
 
-  const OperatorStats* findOperatorStats(
-      const TaskStats& taskStats,
+  const exec::OperatorStats* findOperatorStats(
+      const exec::TaskStats& taskStats,
       const core::PlanNodeId& id) {
     for (auto& p : taskStats.pipelineStats) {
       for (auto& o : p.operatorStats) {
@@ -390,7 +369,7 @@ class VeloxRunner : public QueryBenchmarkBase {
 
   std::string predictionString(
       const core::PlanNodeId& id,
-      const TaskStats& taskStats,
+      const exec::TaskStats& taskStats,
       const optimizer::NodePredictionMap& prediction) {
     auto it = prediction.find(id);
     if (it == prediction.end()) {
@@ -408,33 +387,27 @@ class VeloxRunner : public QueryBenchmarkBase {
   /// Runs a query and returns the result as a single vector in *resultVector,
   /// the plan text in *planString and the error message in *errorString.
   /// *errorString is not set if no error. Any of these may be nullptr.
-  std::shared_ptr<LocalRunner> runSql(
+  std::shared_ptr<runner::LocalRunner> runSql(
       const std::string& sql,
       std::vector<RowVectorPtr>* resultVector = nullptr,
       std::string* planString = nullptr,
       std::string* errorString = nullptr,
       std::vector<exec::TaskStats>* statsReturn = nullptr,
       RunStats* runStatsReturn = nullptr) {
-    std::shared_ptr<LocalRunner> runner;
-    std::unordered_map<std::string, std::shared_ptr<config::ConfigBase>>
-        connectorConfigs;
-    auto copy = hiveConfig_;
-    connectorConfigs[kHiveConnectorId] =
-        std::make_shared<config::ConfigBase>(std::move(copy));
     ++queryCounter_;
+
     auto queryCtx = core::QueryCtx::create(
         executor_.get(),
         core::QueryConfig(config_),
-        std::move(connectorConfigs),
+        {},
         cache::AsyncDataCache::getInstance(),
         rootPool_->shared_from_this(),
         spillExecutor_.get(),
         fmt::format("query_{}", queryCounter_));
 
-    // The default Locus for planning is the system and data of 'connector_'.
     logical_plan::LogicalPlanNodePtr plan;
     try {
-      plan = planner_->parse(sql);
+      plan = parser_->parse(sql);
     } catch (std::exception& e) {
       std::cerr << "parse error: " << e.what() << std::endl;
       if (errorString) {
@@ -442,20 +415,32 @@ class VeloxRunner : public QueryBenchmarkBase {
       }
       return nullptr;
     }
-    MultiFragmentPlan::Options opts;
+
+    if (FLAGS_print_logical_plan) {
+      std::cout << "Logical plan: " << std::endl
+                << logical_plan::PlanPrinter::toText(*plan) << std::endl;
+    }
+
+    runner::MultiFragmentPlan::Options opts;
     opts.numWorkers = FLAGS_num_workers;
     opts.numDrivers = FLAGS_num_drivers;
     auto allocator =
         std::make_unique<HashStringAllocator>(optimizerPool_.get());
     auto context = std::make_unique<optimizer::QueryGraphContext>(*allocator);
+
     optimizer::queryCtx() = context.get();
-    exec::SimpleExpressionEvaluator evaluator(
-        queryCtx.get(), optimizerPool_.get());
+    SCOPE_EXIT {
+      optimizer::queryCtx() = nullptr;
+    };
+
     optimizer::PlanAndStats planAndStats;
     try {
+      // The default Locus for planning is the system and data of 'connector_'.
       optimizer::Locus locus(
           connector_->connectorId().c_str(), connector_.get());
       optimizer::Schema veraxSchema("test", schema_.get(), &locus);
+      exec::SimpleExpressionEvaluator evaluator(
+          queryCtx.get(), optimizerPool_.get());
       optimizer::OptimizerOptions optimizerOpts = {
           .traceFlags = FLAGS_optimizer_trace};
       optimizer::Optimization opt(
@@ -476,48 +461,57 @@ class VeloxRunner : public QueryBenchmarkBase {
       if (FLAGS_print_plan) {
         std::cout << "Plan: " << best->toString(true);
       }
+
       planAndStats = opt.toVeloxPlan(best->op, opts);
+
+      if (FLAGS_print_velox_plan) {
+        std::cout << "Velox executable plan: " << std::endl
+                  << planAndStats.plan->toString() << std::endl;
+      }
     } catch (const std::exception& e) {
-      optimizer::queryCtx() = nullptr;
       std::cerr << "optimizer error: " << e.what() << std::endl;
       if (errorString) {
         *errorString = fmt::format("optimizer error: {}", e.what());
       }
       return nullptr;
     }
-    optimizer::queryCtx() = nullptr;
+
     RunStats runStats;
+    std::shared_ptr<runner::LocalRunner> runner;
     try {
       connector::SplitOptions splitOptions{
           .targetSplitCount = FLAGS_num_workers * FLAGS_num_drivers * 2,
           .fileBytesPerSplit = static_cast<uint64_t>(FLAGS_split_target_bytes)};
-      runner = std::make_shared<LocalRunner>(
+      runner = std::make_shared<runner::LocalRunner>(
           planAndStats.plan,
           queryCtx,
           std::make_shared<connector::ConnectorSplitSourceFactory>(
               splitOptions));
-      std::vector<RowVectorPtr> results;
-      runInner(*runner, results, runStats);
 
-      int numRows = printResults(results);
+      auto results = runInner(*runner, runStats);
+
       if (resultVector) {
         *resultVector = results;
       }
-      auto stats = runner->stats();
+
+      const auto stats = runner->stats();
       if (statsReturn) {
         *statsReturn = stats;
       }
-      auto& fragments = planAndStats.plan->fragments();
+
+      const int numRows = printResults(results);
+
+      const auto& fragments = planAndStats.plan->fragments();
       for (int32_t i = fragments.size() - 1; i >= 0; --i) {
-        for (auto& pipeline : stats[i].pipelineStats) {
-          auto& first = pipeline.operatorStats[0];
+        for (const auto& pipeline : stats[i].pipelineStats) {
+          const auto& first = pipeline.operatorStats[0];
           if (first.operatorType == "TableScan") {
             runStats.rawInputBytes += first.rawInputBytes;
           }
         }
         if (FLAGS_print_stats) {
           std::cout << "Fragment " << i << ":" << std::endl;
-          std::cout << printPlanWithStats(
+          std::cout << exec::printPlanWithStats(
               *fragments[i].fragment.planNode,
               stats[i],
               FLAGS_include_custom_stats,
@@ -562,7 +556,7 @@ class VeloxRunner : public QueryBenchmarkBase {
     }
   }
 
-  void waitForCompletion(const std::shared_ptr<LocalRunner>& runner) {
+  void waitForCompletion(const std::shared_ptr<runner::LocalRunner>& runner) {
     if (runner) {
       try {
         runner->waitForCompletion(500000);
@@ -642,19 +636,24 @@ class VeloxRunner : public QueryBenchmarkBase {
     }
   }
 
-  int32_t printResults(const std::vector<RowVectorPtr>& results) {
-    std::cout << "Results:" << std::endl;
-    bool printType = true;
+  static int32_t printResults(const std::vector<RowVectorPtr>& results) {
     int32_t numRows = 0;
+    for (const auto& result : results) {
+      numRows += result->size();
+    }
+
+    std::cout << "Results: " << numRows << " rows in " << results.size()
+              << " batches" << std::endl;
+
+    if (numRows > 0) {
+      std::cout << results.front()->type()->toString() << std::endl;
+    }
+
+    numRows = 0;
     for (auto vectorIndex = 0; vectorIndex < results.size(); ++vectorIndex) {
       const auto& vector = results[vectorIndex];
-      // Print RowType only once.
-      if (printType) {
-        std::cout << vector->type()->asRow().toString() << std::endl;
-        printType = false;
-      }
       for (vector_size_t i = 0; i < vector->size(); ++i) {
-        std::cout << vector->toString(i) << std::endl;
+        std::cout << vector->deprecatedToString(i, 100) << std::endl;
         if (++numRows >= FLAGS_max_rows) {
           int32_t numLeft = (vector->size() - (i - 1));
           ++vectorIndex;
@@ -662,8 +661,7 @@ class VeloxRunner : public QueryBenchmarkBase {
             numLeft += results[vectorIndex]->size();
           }
           if (numLeft) {
-            std::cout << fmt::format("[Omitted {} more rows.", numLeft)
-                      << std::endl;
+            std::cout << fmt::format("{} more rows.", numLeft) << std::endl;
           }
           return numRows + numLeft;
         }
@@ -672,24 +670,18 @@ class VeloxRunner : public QueryBenchmarkBase {
     return numRows;
   }
 
-  std::shared_ptr<memory::MemoryAllocator> allocator_;
   std::shared_ptr<cache::AsyncDataCache> cache_;
   std::shared_ptr<memory::MemoryPool> rootPool_;
   std::shared_ptr<memory::MemoryPool> optimizerPool_;
-  std::shared_ptr<memory::MemoryPool> schemaPool_;
-  std::shared_ptr<memory::MemoryPool> schemaRootPool_;
   std::shared_ptr<memory::MemoryPool> checkPool_;
   std::unique_ptr<folly::IOThreadPoolExecutor> ioExecutor_;
   std::unique_ptr<folly::IOThreadPoolExecutor> cacheExecutor_;
   std::shared_ptr<folly::CPUThreadPoolExecutor> executor_;
   std::shared_ptr<folly::IOThreadPoolExecutor> spillExecutor_;
-  std::shared_ptr<core::QueryCtx> schemaQueryCtx_;
-  std::shared_ptr<connector::ConnectorQueryCtx> connectorQueryCtx_;
   std::shared_ptr<connector::Connector> connector_;
   std::shared_ptr<optimizer::SchemaResolver> schema_;
   std::unique_ptr<optimizer::VeloxHistory> history_;
-  std::unique_ptr<optimizer::test::QuerySqlParser> planner_;
-  std::unordered_map<std::string, std::string> hiveConfig_;
+  std::unique_ptr<optimizer::test::QuerySqlParser> parser_;
   std::ofstream* record_{nullptr};
   std::ifstream* check_{nullptr};
   int32_t numPassed_{0};
@@ -705,6 +697,9 @@ class VeloxRunner : public QueryBenchmarkBase {
   std::vector<RowVectorPtr> referenceResult_;
   std::set<std::string> modifiedFlags_;
 };
+
+// static
+const std::string VeloxRunner::kHiveConnectorId = exec::test::kHiveConnectorId;
 
 std::string readCommand(std::istream& in, bool& end) {
   std::string line;
@@ -819,39 +814,38 @@ void checkQueries(VeloxRunner& runner) {
   exit(runner.checkStatus());
 }
 
-std::string sevenBit(std::string& in) {
-  for (auto i = 0; i < in.size(); ++i) {
-    if ((uint8_t)in[i] > 127) {
-      in[i] = ' ';
-    }
-  }
-  return in;
-}
+} // namespace axiom
 
 int main(int argc, char** argv) {
-  std::string kUsage(
-      "Velox local SQL command line. Run 'velox_sql --help' for available options.\n");
-  gflags::SetUsageMessage(kUsage);
+  gflags::SetUsageMessage(
+      "Velox local SQL command line. "
+      "Run 'velox_sql --help' for available options.\n");
+
   folly::Init init(&argc, &argv, false);
-  VeloxRunner runner;
+
   try {
+    axiom::VeloxRunner runner;
     runner.initialize();
-    initCommands(runner);
+
+    axiom::initCommands(runner);
+
     if (!FLAGS_query.empty()) {
       runner.run(FLAGS_query);
     } else if (!FLAGS_record.empty()) {
-      recordQueries(runner);
+      axiom::recordQueries(runner);
     } else if (!FLAGS_check.empty()) {
-      checkQueries(runner);
+      axiom::checkQueries(runner);
     } else {
-      std::cout
-          << "Velox SQL. Type statement and end with ;. flag name = value; sets a gflag. help; prints help text."
-          << std::endl;
+      std::cout << "Velox SQL. Type statement and end with ;.\n"
+                   "flag name = value; sets a gflag.\n"
+                   "help; prints help text."
+                << std::endl;
       readCommands(runner, "SQL> ", std::cin);
     }
   } catch (std::exception& e) {
     std::cerr << "Error: " << e.what() << std::endl;
     exit(-1);
   }
+
   return 0;
 }
