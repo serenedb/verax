@@ -1139,7 +1139,10 @@ velox::core::PlanNodePtr Optimization::makeUnionAll(
       localSources);
 }
 
-core::PlanNodePtr Optimization::makeValues(const Values& values) {
+core::PlanNodePtr Optimization::makeValues(
+    const Values& values,
+    ExecutableFragment& fragment) {
+  fragment.width = 1;
   // TODO we need to remove unnecessary columns from the output type vectors
   // auto neededOutputType = makeOutputType(values.columns());
 
@@ -1196,7 +1199,7 @@ core::PlanNodePtr Optimization::makeFragment(
     case RelType::kUnionAll:
       return makeUnionAll(*op->as<UnionAll>(), fragment, stages);
     case RelType::kValues:
-      return makeValues(*op->as<Values>());
+      return makeValues(*op->as<Values>(), fragment);
     default:
       VELOX_FAIL(
           "Unsupported RelationOp {}", static_cast<int32_t>(op->relType()));
