@@ -839,7 +839,7 @@ TEST_F(PlanTest, values) {
 
   const std::vector<std::string>& names = nationType->names();
 
-  auto row_vector = makeRowVector({
+  auto rowVector = makeRowVector(names, {
       makeFlatVector<int64_t>({
           1,
           2,
@@ -861,19 +861,18 @@ TEST_F(PlanTest, values) {
           "comment3",
       }),
   });
-  row_vector->setType(nationType);
 
   lp::PlanBuilder::Context ctx;
   auto t1 = lp::PlanBuilder(ctx)
-                .values({row_vector})
+                .values({rowVector})
                 .filter("n_nationkey < 21")
                 .project({"n_nationkey", "n_regionkey"});
   auto t2 = lp::PlanBuilder(ctx)
-                .values({row_vector})
+                .values({rowVector})
                 .filter("n_nationkey > 16")
                 .project({"n_nationkey", "n_regionkey"});
   auto t3 = lp::PlanBuilder(ctx)
-                .values({row_vector})
+                .values({rowVector})
                 .filter("n_nationkey <= 5")
                 .project({"n_nationkey", "n_regionkey"});
 
@@ -884,7 +883,7 @@ TEST_F(PlanTest, values) {
                          .build();
 
   auto referencePlan = exec::test::PlanBuilder(pool_.get())
-                           .values({row_vector})
+                           .values({rowVector})
                            .filter("n_nationkey > 5 and n_nationkey <= 16")
                            .project({"n_nationkey", "n_regionkey + 1 as rk"})
                            .filter("rk in (1, 2, 4, 5)")

@@ -62,40 +62,40 @@ class UniqueNameChecker {
   std::unordered_set<std::string> names_;
 };
 
+RowTypePtr getType(const std::vector<RowVectorPtr>& values) {
+  VELOX_USER_CHECK(!values.empty(), "Values must not be empty");
+  return values.front()->rowType();
+}
+
 } // namespace
 
-ValuesNode::ValuesNode(
-    std::string id,
-    RowTypePtr rowType,
-    std::vector<Variant> rows)
+ValuesNode::ValuesNode(std::string id, RowTypePtr rowType, Rows rows)
     : LogicalPlanNode{NodeKind::kValues, std::move(id), {}, std::move(rowType)},
       cardinality_{rows.size()},
       data_{std::move(rows)} {
   UniqueNameChecker::check(outputType()->names());
 
-  for (const auto& row : std::get<std::vector<Variant>>(data_)) {
+  for (const auto& row : std::get<Rows>(data_)) {
     VELOX_USER_CHECK(
         row.isTypeCompatible(rowType),
-        "Incompatible types: {} vs. {}",
+        "All rows should have compatible types: {} vs. {}",
         row.inferType()->toString(),
         rowType->toString());
   }
 }
 
-ValuesNode::ValuesNode(
-    std::string id,
-    std::vector<RowVectorPtr> values)
-    : LogicalPlanNode{
-          NodeKind::kValues,
-          std::move(id),
-          {},
-          values.empty() ? ROW({}) : values.front()->rowType()},
+ValuesNode::ValuesNode(std::string id, Values values)
+    : LogicalPlanNode{NodeKind::kValues, std::move(id), {}, getType(values)},
       data_{std::move(values)} {
   UniqueNameChecker::check(outputType()->names());
-  for (const auto& value : std::get<std::vector<RowVectorPtr>>(data_)) {
+
+  for (const auto& value : std::get<Values>(data_)) {
     VELOX_USER_CHECK_NOT_NULL(value);
     VELOX_USER_CHECK(
-        *outputType() == *value->type(), "All values should have same type");
+        *outputType() == *value->type(),
+        "All values should have same types: {} vs. {}",
+        outputType()->toString(),
+        value->type()->toString());
     cardinality_ += value->size();
   }
 }

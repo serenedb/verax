@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 #include "axiom/logical_plan/NameAllocator.h"
-#include "velox/common/base/Exceptions.h"
+#include <velox/common/base/Exceptions.h>
 
 namespace facebook::velox::logical_plan {
 

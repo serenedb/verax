@@ -112,19 +112,27 @@ class LogicalPlanNode {
 /// A table whose content is embedded in the plan.
 class ValuesNode : public LogicalPlanNode {
  public:
+  using Rows = std::vector<Variant>;
+  using Values = std::vector<RowVectorPtr>;
+  using Data = std::variant<Rows, Values>;
+
   /// @param rowType Output schema. A list of column names and types. All names
   /// must be non-empty and unique.
   /// @param rows A list of rows. Each row is a list of values, one per column.
   /// The number, order and types of columns must match 'rowType'.
   ValuesNode(std::string id, RowTypePtr rowType, std::vector<Variant> rows);
 
+  /// @param values A list of values. Each value is a list of columns. 
+  /// Each column is list of values, one per row.
+  /// Each RowVectorPtr must have the same type, 
+  /// type should have non-empty and unique names.
   ValuesNode(std::string id, std::vector<RowVectorPtr> values);
 
   uint64_t cardinality() const {
     return cardinality_;
   }
 
-  const auto& data() const {
+  const Data& data() const {
     return data_;
   }
 
@@ -133,7 +141,7 @@ class ValuesNode : public LogicalPlanNode {
 
  private:
   uint64_t cardinality_ = 0;
-  const std::variant<std::vector<Variant>, std::vector<RowVectorPtr>> data_;
+  const Data data_;
 };
 
 using ValuesNodePtr = std::shared_ptr<const ValuesNode>;

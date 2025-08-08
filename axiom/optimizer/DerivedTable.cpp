@@ -749,6 +749,8 @@ void DerivedTable::distributeConjuncts() {
       if (tables[0] == this) {
         continue; // the conjunct depends on containing dt, like grouping or
                   // existence flags. Leave in place.
+      } else if (tables[0]->type() == PlanType::kValuesTable) {
+        continue; // ValuesTable does not have filter push-down.
       } else if (tables[0]->type() == PlanType::kDerivedTable) {
         // Translate the column names and add the condition to the conjuncts in
         // the dt. If the inner is a set operation, add the filter to children.
@@ -770,8 +772,6 @@ void DerivedTable::distributeConjuncts() {
             changedDts.push_back(childDt);
           }
         }
-      } else if (tables[0]->type() == PlanType::kValuesTable) {
-        continue; // ValuesTable does not have filter push-down.
       } else {
         VELOX_CHECK(tables[0]->type() == PlanType::kTable);
         tables[0]->as<BaseTable>()->addFilter(conjuncts[i]);

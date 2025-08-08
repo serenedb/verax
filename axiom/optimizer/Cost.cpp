@@ -96,6 +96,19 @@ float orderPrefixDistance(
   return selection;
 }
 
+namespace {
+
+void updateCost(float cardinality, ColumnVector& columns, Cost& cost) {
+  cost.fanout = cardinality;
+  const auto size = byteSize(columns);
+  const auto numColumns = columns.size();
+  const auto rowCost = numColumns * Costs::kColumnRowCost +
+      std::max<float>(0, size - 8 * numColumns) * Costs::kColumnByteCost;
+  cost.unitCost += cost.fanout * rowCost;
+}
+
+} // namespace
+
 void TableScan::setCost(const PlanState& input) {
   RelationOp::setCost(input);
   if (!keys.empty()) {
@@ -116,23 +129,15 @@ void TableScan::setCost(const PlanState& input) {
     }
     return;
   }
-  cost_.fanout =
+  const auto cardinality =
       index->distribution().cardinality * baseTable->filterSelectivity;
-  auto size = byteSize(columns_);
-  auto numColumns = columns_.size();
-  auto rowCost = numColumns * Costs::kColumnRowCost +
-      std::max<float>(0, size - 8 * numColumns) * Costs::kColumnByteCost;
-  cost_.unitCost += cost_.fanout * rowCost;
+  updateCost(cardinality, columns_, cost_);
 }
 
 void Values::setCost(const PlanState& input) {
   RelationOp::setCost(input);
-  cost_.fanout = valuesTable.cardinality();
-  auto size = byteSize(columns_);
-  auto numColumns = columns_.size();
-  auto rowCost = numColumns * Costs::kColumnRowCost +
-      std::max<float>(0, size - 8 * numColumns) * Costs::kColumnByteCost;
-  cost_.unitCost += cost_.fanout * rowCost;
+  const auto cardinality = valuesTable.cardinality();
+  updateCost(cardinality, columns_, cost_);
 }
 
 void Aggregation::setCost(const PlanState& input) {
