@@ -98,7 +98,7 @@ float orderPrefixDistance(
 
 namespace {
 
-void updateCost(float cardinality, ColumnVector& columns, Cost& cost) {
+void updateCost(float cardinality, const ColumnVector& columns, Cost& cost) {
   cost.fanout = cardinality;
   const auto size = byteSize(columns);
   const auto numColumns = columns.size();

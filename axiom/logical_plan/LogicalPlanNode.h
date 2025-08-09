@@ -122,10 +122,12 @@ class ValuesNode : public LogicalPlanNode {
   /// The number, order and types of columns must match 'rowType'.
   ValuesNode(std::string id, RowTypePtr rowType, std::vector<Variant> rows);
 
-  /// @param values A list of values. Each value is a list of columns. 
+  /// @param values A list of values. Each value is a list of columns.
   /// Each column is list of values, one per row.
-  /// Each RowVectorPtr must have the same type, 
+  /// Each RowVectorPtr must have the same type,
   /// type should have non-empty and unique names.
+  /// Memory pools used for RowVector's allocation should live up to execution
+  /// of the velox::exec::Values
   ValuesNode(std::string id, std::vector<RowVectorPtr> values);
 
   uint64_t cardinality() const {
@@ -140,7 +142,7 @@ class ValuesNode : public LogicalPlanNode {
       const override;
 
  private:
-  uint64_t cardinality_ = 0;
+  const uint64_t cardinality_ = 0;
   const Data data_;
 };
 

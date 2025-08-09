@@ -264,10 +264,16 @@ struct TableScan : public RelationOp {
 /// Represents a values.
 struct Values : RelationOp {
   Values(
-      Distribution distribution,
       const ValuesTable& valuesTable,
       ColumnVector columns)
-      : RelationOp{RelType::kValues, nullptr, std::move(distribution), std::move(columns)},
+      : RelationOp{
+          RelType::kValues,
+          nullptr,
+          Distribution{
+            DistributionType{.isParallel = false}, 
+            valuesTable.cardinality(),
+            {}},
+          std::move(columns)},
         valuesTable{valuesTable} {
     cost_.fanout = valuesTable.cardinality();
   }

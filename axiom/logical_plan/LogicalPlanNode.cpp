@@ -86,18 +86,21 @@ ValuesNode::ValuesNode(std::string id, RowTypePtr rowType, Rows rows)
 
 ValuesNode::ValuesNode(std::string id, Values values)
     : LogicalPlanNode{NodeKind::kValues, std::move(id), {}, getType(values)},
+      cardinality_{[&] {
+        uint64_t cardinality = 0;
+        for (const auto& value : values) {
+          VELOX_USER_CHECK_NOT_NULL(value);
+          VELOX_USER_CHECK(
+              outputType()->equivalent(*value->type()),
+              "All values should have equivalent types: {} vs. {}",
+              outputType()->toString(),
+              value->type()->toString());
+          cardinality += value->size();
+        }
+        return cardinality;
+      }()},
       data_{std::move(values)} {
   UniqueNameChecker::check(outputType()->names());
-
-  for (const auto& value : std::get<Values>(data_)) {
-    VELOX_USER_CHECK_NOT_NULL(value);
-    VELOX_USER_CHECK(
-        outputType()->equivalent(*value->type()),
-        "All values should have equivalent types: {} vs. {}",
-        outputType()->toString(),
-        value->type()->toString());
-    cardinality_ += value->size();
-  }
 }
 
 void ValuesNode::accept(

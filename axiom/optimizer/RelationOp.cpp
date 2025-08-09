@@ -206,9 +206,8 @@ std::string TableScan::toString(bool /*recursive*/, bool detail) const {
   out << baseTable->schemaTable->name << " " << baseTable->cname;
   if (detail) {
     printCost(detail, out);
-    if (!input()) {
-      out << distribution_.toString() << std::endl;
-    }
+    VELOX_DCHECK(!input());
+    out << distribution_.toString() << std::endl;
   }
   return out.str();
 }
@@ -228,9 +227,8 @@ std::string Values::toString(bool /*recursive*/, bool detail) const {
   out << valuesTable.values.id() << " " << valuesTable.cname;
   if (detail) {
     printCost(detail, out);
-    if (!input()) {
-      out << distribution_.toString() << std::endl;
-    }
+    VELOX_DCHECK(!input());
+    out << distribution_.toString() << std::endl;
   }
   return out.str();
 }

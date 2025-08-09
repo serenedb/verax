@@ -1692,16 +1692,7 @@ void Optimization::makeJoins(RelationOpPtr plan, PlanState& state) {
         });
 
         state.columns.unionObjects(columns);
-        auto* scan = make<Values>(
-            Distribution{
-                DistributionType{
-                    .isParallel = false,
-                },
-                valuesTable->cardinality(),
-                {},
-            },
-            *valuesTable,
-            std::move(columns));
+        auto* scan = make<Values>(*valuesTable, std::move(columns));
         state.addCost(*scan);
         makeJoins(scan, state);
       } else {

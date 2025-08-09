@@ -890,6 +890,18 @@ TEST_F(PlanTest, values) {
     return plan;
   };
 
+  // In this test, we verify that the optimizer can handle
+  // combinations of logical plans with different leaf types (table scan vs
+  // values) and that it can generate the correct physical plan for each
+  // combination.
+  // Combinations vector needed only for reader/writer convinience.
+  // We check following cases:
+  // 1. t1 join t2
+  // 2. t1 join (t2 join t3)
+  // 3. t1 join (t2 join (t3 join t4))
+  // t* can be either table scan or values.
+  // We don't check produced plan, only that it results to the same rows as
+  // correct exection plan.
   struct Combination {
     uint8_t leafType1 = 0;
     uint8_t leafType2 = 0;
