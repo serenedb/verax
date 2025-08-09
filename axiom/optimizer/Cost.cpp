@@ -199,6 +199,19 @@ void UnionAll::setCost(const PlanState& input) {
   }
 }
 
+void Limit::setCost(const PlanState& input) {
+  cost_.unitCost = 0.01;
+  if (input.cost.inputCardinality <= limit) {
+    // Input cardinality does not exceed the limit. The limit is no-op. Doesn't
+    // change cardinality.
+    cost_.fanout = 1;
+  } else {
+    // Input cardinality exceeds the limit. Calculate fanout to ensure that
+    // fanout * limit = input-cardinality.
+    cost_.fanout = limit / input.cost.inputCardinality;
+  }
+}
+
 float selfCost(ExprCP expr) {
   switch (expr->type()) {
     case PlanType::kColumn: {

@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include "axiom/logical_plan/Expr.h"
 #include "axiom/optimizer/Schema.h"
 #include "velox/core/PlanNode.h"
 

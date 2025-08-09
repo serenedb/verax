@@ -63,6 +63,14 @@ class PlanMatcherBuilder {
   PlanMatcherBuilder& localPartition(
       const std::shared_ptr<PlanMatcher>& matcher);
 
+  PlanMatcherBuilder& partitionedOutput();
+
+  PlanMatcherBuilder& exchange();
+
+  PlanMatcherBuilder& limit();
+
+  PlanMatcherBuilder& limit(int64_t offset, int64_t count);
+
   std::shared_ptr<PlanMatcher> build() {
     return matcher_;
   }

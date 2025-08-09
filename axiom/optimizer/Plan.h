@@ -1161,6 +1161,12 @@ class Optimization {
       velox::runner::ExecutableFragment& fragment,
       std::vector<velox::runner::ExecutableFragment>& stages);
 
+  // Makes partial + final limit fragments.
+  velox::core::PlanNodePtr makeLimit(
+      const Limit& op,
+      velox::runner::ExecutableFragment& fragment,
+      std::vector<velox::runner::ExecutableFragment>& stages);
+
   velox::core::PlanNodePtr makeScan(
       const TableScan& scan,
       velox::runner::ExecutableFragment& fragment,
@@ -1222,6 +1228,8 @@ class Optimization {
       const PlanObjectSet& topExprs,
       const PlanObjectSet& placed,
       const PlanObjectSet& extraColumns);
+
+  runner::ExecutableFragment newFragment();
 
   PlanObjectCP findLeaf(const logical_plan::LogicalPlanNode* node) {
     auto* leaf = logicalPlanLeaves_[node];

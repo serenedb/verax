@@ -79,11 +79,6 @@ class QueryTestBase : public exec::test::LocalRunnerTestBase {
   std::shared_ptr<optimizer::SchemaResolver> schema_;
 
  private:
-  template <typename PlanPtr>
-  optimizer::PlanAndStats planFromTree(
-      const PlanPtr& plan,
-      std::string* planString);
-
   core::PlanNodePtr toTableScan(
       const std::string& id,
       const std::string& name,

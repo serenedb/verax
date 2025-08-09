@@ -228,9 +228,8 @@ std::shared_ptr<core::QueryCtx> QueryTestBase::getQueryCtx() {
   return queryCtx_;
 }
 
-template <typename PlanPtr>
-optimizer::PlanAndStats QueryTestBase::planFromTree(
-    const PlanPtr& plan,
+optimizer::PlanAndStats QueryTestBase::planVelox(
+    const logical_plan::LogicalPlanNodePtr& plan,
     std::string* planString) {
   auto queryCtx = getQueryCtx();
 
@@ -263,12 +262,6 @@ optimizer::PlanAndStats QueryTestBase::planFromTree(
     *planString = best->op->toString(true, false);
   }
   return opt.toVeloxPlan(best->op, opts);
-}
-
-optimizer::PlanAndStats QueryTestBase::planVelox(
-    const logical_plan::LogicalPlanNodePtr& plan,
-    std::string* planString) {
-  return planFromTree(plan, planString);
 }
 
 TestResult QueryTestBase::runVelox(

@@ -827,6 +827,11 @@ void Optimization::addPostprocess(
     auto* project = make<Project>(plan, dt->exprs, dt->columns);
     plan = project;
   }
+  if (dt->orderBy == nullptr && dt->limit >= 0) {
+    auto limit = make<Limit>(plan, dt->limit, dt->offset);
+    state.addCost(*limit);
+    plan = limit;
+  }
 }
 
 namespace {

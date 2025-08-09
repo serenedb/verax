@@ -491,4 +491,20 @@ struct UnionAll : public RelationOp {
   const RelationOpPtrVector inputs;
 };
 
+struct Limit : public RelationOp {
+  Limit(RelationOpPtr input, int64_t limit, int64_t offset)
+      : RelationOp(
+            RelType::kLimit,
+            input,
+            input->distribution(),
+            input->columns()),
+        limit{limit},
+        offset{offset} {}
+
+  void setCost(const PlanState& input) override;
+
+  const int64_t limit;
+  const int64_t offset;
+};
+
 } // namespace facebook::velox::optimizer

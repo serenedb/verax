@@ -115,8 +115,8 @@ struct DerivedTable : public PlanObject {
   AggregationPlanCP aggregation{nullptr};
   ExprVector having;
   OrderByP orderBy{nullptr};
-  int32_t limit{-1};
-  int32_t offset{0};
+  int64_t limit{-1};
+  int64_t offset{0};
 
   /// Adds an equijoin edge between 'left' and 'right'. The flags correspond to
   /// the like-named members in Join.

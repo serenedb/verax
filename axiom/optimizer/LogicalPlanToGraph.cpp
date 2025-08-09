@@ -1403,6 +1403,11 @@ PlanObjectP Optimization::makeQueryGraph(
       return addOrderBy(*node.asUnchecked<lp::SortNode>());
 
     case lp::NodeKind::kLimit: {
+      // TODO Allow multiple limits.
+      //
+      // SELECT * FROM (SELECT * FROM t LIMIT 10 OFFSET 5) LIMIT 10 OFFSET 5
+      // is equivalent to
+      //    SELECT * FROM t LIMIT 5 OFFSET 10
       if (!contains(allowedInDt, PlanType::kLimit)) {
         return wrapInDt(node);
       }

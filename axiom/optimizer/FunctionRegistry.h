@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include "axiom/logical_plan/Expr.h"
 #include "axiom/optimizer/QueryGraph.h"
 
 namespace facebook::velox::optimizer {

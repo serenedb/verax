@@ -188,6 +188,34 @@ class FilterMatcher : public PlanMatcherImpl<FilterNode> {
   const std::optional<std::string> predicate_;
 };
 
+class LimitMatcher : public PlanMatcherImpl<LimitNode> {
+ public:
+  explicit LimitMatcher(const std::shared_ptr<PlanMatcher>& matcher)
+      : PlanMatcherImpl<LimitNode>({matcher}) {}
+
+  LimitMatcher(
+      const std::shared_ptr<PlanMatcher>& matcher,
+      int64_t offset,
+      int64_t count)
+      : PlanMatcherImpl<LimitNode>({matcher}), offset_{offset}, count_{count} {}
+
+  bool matchDetails(const LimitNode& plan) const override {
+    if (count_.has_value()) {
+      EXPECT_EQ(plan.offset(), offset_.value());
+      EXPECT_EQ(plan.count(), count_.value());
+      if (::testing::Test::HasNonfatalFailure()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  const std::optional<int64_t> offset_;
+  const std::optional<int64_t> count_;
+};
+
 class AggregationMatcher : public PlanMatcherImpl<AggregationNode> {
  public:
   explicit AggregationMatcher(const std::shared_ptr<PlanMatcher>& matcher)
@@ -338,4 +366,28 @@ PlanMatcherBuilder& PlanMatcherBuilder::localPartition(
   return *this;
 }
 
+PlanMatcherBuilder& PlanMatcherBuilder::partitionedOutput() {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<PlanMatcherImpl<PartitionedOutputNode>>(
+      std::vector<std::shared_ptr<PlanMatcher>>{matcher_});
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::exchange() {
+  VELOX_USER_CHECK_NULL(matcher_);
+  matcher_ = std::make_shared<PlanMatcherImpl<ExchangeNode>>();
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::limit() {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<LimitMatcher>(matcher_);
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::limit(int64_t offset, int64_t count) {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<LimitMatcher>(matcher_, offset, count);
+  return *this;
+}
 } // namespace facebook::velox::core

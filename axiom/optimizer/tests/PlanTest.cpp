@@ -194,6 +194,51 @@ TEST_F(PlanTest, queryGraph) {
   EXPECT_EQ(interned2, interned);
 }
 
+TEST_F(PlanTest, limit) {
+  testConnector_->addTable(
+      "numbers", ROW({"a", "b", "c"}, {BIGINT(), DOUBLE(), VARCHAR()}));
+
+  auto logicalPlan = lp::PlanBuilder()
+                         .tableScan(kTestConnectorId, "numbers", {"a", "b"})
+                         .limit(5, 10)
+                         .build();
+
+  // Verify single-node plan.
+  {
+    auto plan = toSingleNodePlan(logicalPlan);
+
+    auto matcher =
+        core::PlanMatcherBuilder().tableScan().project().limit(5, 10).build();
+    ASSERT_TRUE(matcher->match(plan));
+  }
+
+  // Verify distributed plan.
+  {
+    const auto distributedPlan = planVelox(logicalPlan);
+    const auto& fragments = distributedPlan.plan->fragments();
+    ASSERT_EQ(3, fragments.size());
+
+    EXPECT_EQ(fragments.at(0).scans.size(), 1);
+    EXPECT_EQ(fragments.at(1).scans.size(), 0);
+    EXPECT_EQ(fragments.at(2).scans.size(), 0);
+
+    auto matcher = core::PlanMatcherBuilder()
+                       .tableScan()
+                       .project()
+                       .limit(5, 10)
+                       .partitionedOutput()
+                       .build();
+    ASSERT_TRUE(matcher->match(fragments.at(0).fragment.planNode));
+
+    matcher = core::PlanMatcherBuilder()
+                  .exchange()
+                  .limit(5, 10)
+                  .partitionedOutput()
+                  .build();
+    ASSERT_TRUE(matcher->match(fragments.at(1).fragment.planNode));
+  }
+}
+
 TEST_F(PlanTest, agg) {
   testConnector_->addTable(
       "numbers", ROW({"a", "b", "c"}, {BIGINT(), DOUBLE(), VARCHAR()}));
