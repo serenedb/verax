@@ -16,7 +16,7 @@ if(AXIOM_BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 
-add_library(
+velox_add_library(
   axiom_optimizer
   BitSet.cpp
   ConstantExprEvaluator.cpp
@@ -45,7 +45,7 @@ add_library(
   VeloxHistory.cpp
 )
 
-target_link_libraries(
+velox_link_libraries(
   axiom_optimizer
   velox_core
   axiom_common

@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_library(axiom_common Session.cpp)
+velox_add_library(axiom_common Session.cpp)
 
-target_link_libraries(axiom_common axiom_connectors)
+velox_link_libraries(axiom_common axiom_connectors)

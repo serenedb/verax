@@ -24,6 +24,6 @@ if(AXIOM_BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 
-add_library(axiom_connectors ConnectorMetadata.cpp SchemaUtils.cpp)
+velox_add_library(axiom_connectors ConnectorMetadata.cpp SchemaUtils.cpp)
 
-target_link_libraries(axiom_connectors velox_common_base velox_memory velox_connector)
+velox_link_libraries(axiom_connectors velox_common_base velox_memory velox_connector)
