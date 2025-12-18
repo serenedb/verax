@@ -366,7 +366,7 @@ class TestConnector : public velox::connector::Connector {
  public:
   explicit TestConnector(
       const std::string& id,
-      std::shared_ptr<const velox::config::ConfigBase> config = nullptr)
+      velox::config::ConfigPtr config = nullptr)
       : Connector(id, std::move(config)),
         metadata_{std::make_shared<TestConnectorMetadata>(this)} {
     ConnectorMetadata::registerMetadata(id, metadata_);
@@ -437,7 +437,7 @@ class TestConnectorFactory : public velox::connector::ConnectorFactory {
 
   std::shared_ptr<velox::connector::Connector> newConnector(
       const std::string& id,
-      std::shared_ptr<const velox::config::ConfigBase> config = nullptr,
+      velox::config::ConfigPtr config = nullptr,
       folly::Executor* ioExecutor = nullptr,
       folly::Executor* cpuExecutor = nullptr) override;
 };

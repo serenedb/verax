@@ -50,8 +50,7 @@ void LocalRunnerTestBase::TearDown() {
 
 std::shared_ptr<velox::core::QueryCtx> LocalRunnerTestBase::makeQueryCtx(
     const std::string& queryId) {
-  std::unordered_map<std::string, std::shared_ptr<velox::config::ConfigBase>>
-      connectorConfigs;
+  velox::core::ConnectorConfigs connectorConfigs;
   connectorConfigs[velox::exec::test::kHiveConnectorId] =
       std::make_shared<velox::config::ConfigBase>(folly::copy(hiveConfig_));
 

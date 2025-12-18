@@ -67,8 +67,7 @@ std::shared_ptr<velox::core::QueryCtx> PrestoQueryReplayRunner::makeQueryCtx(
     const std::shared_ptr<velox::memory::MemoryPool>& rootPool) {
   auto& config = config_;
   auto hiveConfig = hiveConfig_;
-  std::unordered_map<std::string, std::shared_ptr<velox::config::ConfigBase>>
-      connectorConfigs;
+  velox::core::ConnectorConfigs connectorConfigs;
   connectorConfigs[kHiveConnectorId] =
       std::make_shared<velox::config::ConfigBase>(std::move(hiveConfig));
 
