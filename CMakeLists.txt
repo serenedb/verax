@@ -16,165 +16,33 @@ cmake_minimum_required(VERSION 3.14)
 # Set the project name.
 project(axiom)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+list(PREPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/CMake" "${PROJECT_SOURCE_DIR}/../velox/CMake")
 
-# Enable generation of compile_commands.json for clang tools
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-add_compile_definitions(DISABLE_META_INTERNAL_COMPRESSOR=1)
-
-# Sets new behavior for CMP0135, which controls how timestamps are extracted
-# when using ExternalProject_Add():
-# https://cmake.org/cmake/help/latest/policy/CMP0135.html
-if(POLICY CMP0135)
-  cmake_policy(SET CMP0135 NEW)
-  set(CMAKE_POLICY_DEFAULT_CMP0135 NEW)
-endif()
-
-# Use ThirdPartyToolchain dependencies macros from Velox.
-list(
-  PREPEND
-  CMAKE_MODULE_PATH
-  "${PROJECT_SOURCE_DIR}/CMake"
-  "${PROJECT_SOURCE_DIR}/CMake/resolve_dependency_modules"
-  "${PROJECT_SOURCE_DIR}/velox/CMake"
-)
-include(ResolveDependency)
-
-set(VELOX_BUILD_VECTOR_TEST_UTILS ON CACHE BOOL "Velox vector test utilities (VectorMaker).")
-
-set(VELOX_ENABLE_PARQUET ON)
-set(VELOX_BUILD_TEST_UTILS ON)
-set(VELOX_BUILD_TESTING OFF)
-
-set(VELOX_DEPENDENCY_SOURCE AUTO CACHE STRING "Default dependency source: AUTO SYSTEM or BUNDLED.")
-
-option(AXIOM_ENABLE_CCACHE "Use ccache if installed." ON)
-
-message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-
-set(
-  BOOST_INCLUDE_LIBRARIES
-  atomic
-  context
-  date_time
-  filesystem
-  program_options
-  regex
-  system
-  thread
-)
-
-velox_set_source(Boost)
-velox_resolve_dependency(Boost 1.77.0 COMPONENTS ${BOOST_INCLUDE_LIBRARIES})
-
-# Ignore known compiler warnings.
-check_cxx_compiler_flag("-Wstringop-overread" COMPILER_HAS_W_STRINGOP_OVERREAD)
-if(COMPILER_HAS_W_STRINGOP_OVERREAD)
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overread")
-endif()
-
-check_cxx_compiler_flag("-Wdeprecated-declarations" COMPILER_HAS_W_DEPRECATED_DECLARATIONS)
-if(COMPILER_HAS_W_DEPRECATED_DECLARATIONS)
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-deprecated-declarations")
-endif()
-
-check_cxx_compiler_flag("-Wmaybe-uninitialized" COMPILER_HAS_W_MAYBE_UNINITIALIZED)
-if(COMPILER_HAS_W_MAYBE_UNINITIALIZED)
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-maybe-uninitialized")
-endif()
-
-check_cxx_compiler_flag("-Wunknown-warning-option" COMPILER_HAS_W_UNKNOWN_WARNING_OPTION)
-if(COMPILER_HAS_W_UNKNOWN_WARNING_OPTION)
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-warning-option")
-endif()
-
-check_cxx_compiler_flag("-Wnullability-completeness" COMPILER_HAS_W_NULLABILITY_COMPLETENESS)
-if(COMPILER_HAS_W_NULLABILITY_COMPLETENESS)
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-nullability-completeness")
-endif()
-
-# Axiom, Velox and folly need to be compiled with the same compiler flags.
-execute_process(
-  COMMAND
-    bash -c
-    "( source ${CMAKE_CURRENT_SOURCE_DIR}/velox/scripts/setup-helper-functions.sh && echo -n $(get_cxx_flags $ENV{CPU_TARGET}))"
-  OUTPUT_VARIABLE SCRIPT_CXX_FLAGS
-  RESULT_VARIABLE COMMAND_STATUS
-)
-
-if(COMMAND_STATUS EQUAL "1")
-  message(FATAL_ERROR "Unable to determine compiler flags!")
-endif()
-message("Setting CMAKE_CXX_FLAGS=${SCRIPT_CXX_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SCRIPT_CXX_FLAGS}")
-
-if(
-  AXIOM_ENABLE_CCACHE
-  AND NOT CMAKE_C_COMPILER_LAUNCHER
-  AND NOT CMAKE_CXX_COMPILER_LAUNCHER
-  AND NOT CMAKE_CUDA_COMPILER_LAUNCHER
-)
-  find_program(CCACHE_FOUND ccache)
-
-  if(CCACHE_FOUND)
-    message(STATUS "Using ccache: ${CCACHE_FOUND}")
-    set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_FOUND})
-    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_FOUND})
-    set(CMAKE_CUDA_COMPILER_LAUNCHER ${CCACHE_FOUND})
-    # keep comments as they might matter to the compiler
-    set(ENV{CCACHE_COMMENTS} "1")
-  endif()
-endif()
-
-message("FINAL CMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
-
-include(CTest) # include after project() but before add_subdirectory()
-
-velox_set_source(gtest)
-velox_resolve_dependency(gtest)
-
-velox_set_source(glog)
-velox_resolve_dependency(glog)
-
-velox_set_source(gflags)
-velox_resolve_dependency(gflags COMPONENTS shared)
-
-velox_set_source(Boost)
-velox_resolve_dependency(Boost 1.77.0 COMPONENTS ${BOOST_INCLUDE_LIBRARIES})
-
-velox_set_source(folly)
-velox_resolve_dependency(folly)
-
-# Add ANTLR4 runtime dependency
-velox_set_source(antlr4-runtime)
-velox_resolve_dependency(antlr4-runtime)
-
-message(STATUS "Using ANTLR4 runtime from ${ANTLR4_INCLUDE_DIR}")
-
-# Use xxhash and xsimd from Velox for now.
-include_directories(.)
-include_directories(${CMAKE_BINARY_DIR})
-include_directories(${CMAKE_BINARY_DIR}/velox)
-include_directories(SYSTEM velox)
-include_directories(SYSTEM velox/velox/external/xxhash axiom)
-include_directories(SYSTEM ${CMAKE_BINARY_DIR}/_deps/xsimd-src/include/)
-include_directories(${ANTLR4_INCLUDE_DIR})
-
-add_subdirectory(velox)
 add_subdirectory(axiom/common)
-add_subdirectory(axiom/sql/presto)
+# TODO(mbkkt) add_subdirectory(axiom/sql/presto)
 add_subdirectory(axiom/logical_plan)
 add_subdirectory(axiom/runner)
 add_subdirectory(axiom/connectors)
 add_subdirectory(axiom/optimizer)
 add_subdirectory(axiom/cli)
 
-add_library(axiom_mono INTERFACE)
-add_library(Axiom::axiom ALIAS axiom_mono)
+if(NOT AXIOM_BUILD_TESTING)
+  return()
+endif()
 
-target_link_libraries(
-  axiom_mono
-  INTERFACE axiom_connector_metadata axiom_optimizer axiom_runner_local_runner
+add_custom_target(
+  axiom-tests
+  DEPENDS
+    # TODO(mbkkt) axiom_local_hive_connector_metadata_test
+    axiom_test_connector_test
+    axiom_connectors_tests
+    # TODO(mbkkt) axiom_tpch_connector_metadata_test
+    axiom_logical_plan_tests
+    # TODO(mbkkt) axiom_optimizer_tpch_plan_test
+    # TODO(mbkkt) axiom_optimizer_tests
+    axiom_model_test
+  # TODO(mbkkt) axiom_runner_local_runner_test
+  # TODO(mbkkt) axiom_runner_presto_query_replay_runner_test
+  # TODO(mbkkt) axiom_sql_presto_grammar_test
+  # TODO(mbkkt) axiom_sql_presto_test
 )
