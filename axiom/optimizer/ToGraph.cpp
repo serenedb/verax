@@ -1472,7 +1472,8 @@ AggregationPlanCP ToGraph::translateAggregation(const lp::AggregateNode& agg) {
       if (metadata.ignoreDuplicates) {
         return false;
       }
-      if ((aggName == toName("min") || aggName == toName("max")) &&
+      if ((aggName == toName("presto_min") ||
+           aggName == toName("presto_max")) &&
           args.size() == 1) {
         // Presto's min/max are not marked 'ignoreDuplicates' because while
         // min(x) and max(x) do ignore duplicates, min(x, n) and max(x, n) do
@@ -1790,9 +1791,9 @@ ColumnCP ToGraph::makeCountStarWrapper(DerivedTableP inputDt) {
   auto* wrapperDt = newDt();
   wrapperDt->addTable(inputDt);
 
-  auto countName = toName("count");
+  auto countName = toName("presto_count");
   auto accumulatorType =
-      toType(velox::exec::resolveIntermediateType("count", {}));
+      toType(velox::exec::resolveIntermediateType("presto_count", {}));
   Value countValue(toType(velox::BIGINT()), 1);
 
   AggregateCP countAggregate = make<Aggregate>(
