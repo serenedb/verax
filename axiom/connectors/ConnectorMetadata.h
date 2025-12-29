@@ -442,7 +442,7 @@ enum class WriteKind {
 
 AXIOM_DECLARE_ENUM_NAME(WriteKind);
 
-using RowsFuture = folly::SemiFuture<int64_t>;
+using RowsFuture = yaclib::Future<int64_t>;
 
 /// Base class for table. This is used for name resolution. A TableLayout is
 /// used for accessing physical organization like partitioning and sort order.
@@ -706,7 +706,7 @@ class ConnectorMetadata {
   virtual velox::ContinueFuture abortWrite(
       const ConnectorSessionPtr& session,
       const ConnectorWriteHandlePtr& handle) noexcept {
-    return {};
+    return velox::ContinueFuture::make();
   }
 
   /// Drop table with the specified name. If table doesn't exist and 'ifExists'

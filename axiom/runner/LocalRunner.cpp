@@ -20,6 +20,8 @@
 #include "velox/exec/Exchange.h"
 #include "velox/exec/PlanNodeStats.h"
 
+#include <yaclib/async/join.hpp>
+
 namespace facebook::axiom::runner {
 namespace {
 
@@ -196,7 +198,7 @@ int64_t LocalRunner::runWrite() {
     }
     throw;
   }
-  auto rows = std::move(finishWrite).commit(result).get();
+  auto rows = std::move(finishWrite).commit(result).Get().Ok();
 
   finishWrite = {};
   state = State::kFinished;
@@ -301,19 +303,19 @@ void LocalRunner::abort() {
 }
 
 velox::ContinueFuture LocalRunner::wait() {
-  std::vector<velox::ContinueFuture> futures;
+  std::vector<velox::ContinueFuture::Base> futures;
   {
     std::lock_guard<std::mutex> l(mutex_);
     if (state_ != State::kInitialized) {
       for (auto& stage : stages_) {
         for (auto& task : stage) {
-          futures.push_back(task->taskDeletionFuture());
+          futures.push_back(task->taskDeletionFuture().future);
         }
         stage.clear();
       }
     }
   }
-  return folly::collectAll(std::move(futures)).defer([](auto&&) {});
+  return yaclib::Join(futures.begin(), futures.size());
 }
 
 void LocalRunner::waitForCompletion(
@@ -343,11 +345,7 @@ void LocalRunner::waitForCompletion(
         "LocalRunner did not finish within {} us",
         maxWaitMicros);
 
-    auto& executor = folly::QueuedImmediateExecutor::instance();
-    std::move(future)
-        .within(std::chrono::microseconds(maxWaitMicros - elapsedTime))
-        .via(&executor)
-        .wait();
+    future.wait(std::chrono::microseconds(maxWaitMicros - elapsedTime));
   }
 }
 
