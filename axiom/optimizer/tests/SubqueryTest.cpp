@@ -302,10 +302,10 @@ TEST_F(SubqueryTest, correlatedExists) {
             .hashJoin(
                 core::PlanMatcherBuilder().tableScan("region").build(),
                 velox::core::JoinType::kInner)
+            .project()
             .hashJoin(
                 core::PlanMatcherBuilder().tableScan("nation").build(),
                 velox::core::JoinType::kLeftSemiFilter)
-            .project()
             .build();
 
     {
@@ -562,7 +562,6 @@ TEST_F(SubqueryTest, correlatedScalar) {
                            core::PlanMatcherBuilder()
                                .tableScan("nation")
                                .singleAggregation()
-                               .project()
                                .build(),
                            velox::core::JoinType::kLeft)
                        .filter()
@@ -580,7 +579,6 @@ TEST_F(SubqueryTest, correlatedProject) {
     return core::PlanMatcherBuilder()
         .tableScan("nation")
         .singleAggregation()
-        .project()
         .build();
   };
 
@@ -879,7 +877,6 @@ TEST_F(SubqueryTest, unnest) {
         core::PlanMatcherBuilder()
             .tableScan("u")
             .aggregation()
-            .project()
             .hashJoin(
                 core::PlanMatcherBuilder().tableScan("t").unnest().build(),
                 core::JoinType::kRight)

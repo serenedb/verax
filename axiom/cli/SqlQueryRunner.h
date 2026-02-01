@@ -139,9 +139,7 @@ class SqlQueryRunner {
           const facebook::axiom::optimizer::DerivedTable&)>& checkDerivedTable =
           nullptr,
       const std::function<bool(const facebook::axiom::optimizer::RelationOp&)>&
-          checkBestPlan = nullptr,
-      std::shared_ptr<facebook::axiom::connector::SchemaResolver>
-          schemaResolver = nullptr);
+          checkBestPlan = nullptr);
 
   std::shared_ptr<facebook::axiom::runner::LocalRunner> makeLocalRunner(
       facebook::axiom::optimizer::PlanAndStats& planAndStats,
@@ -153,9 +151,7 @@ class SqlQueryRunner {
   /// *errorString is not set if no error. Any of these may be nullptr.
   std::vector<facebook::velox::RowVectorPtr> runLogicalPlan(
       const facebook::axiom::logical_plan::LogicalPlanNodePtr& logicalPlan,
-      const RunOptions& options,
-      std::shared_ptr<facebook::axiom::connector::SchemaResolver>
-          schemaResolver = nullptr);
+      const RunOptions& options);
 
   // Wait maxWaitMicros microseconds for the LocalRunner to complete.  If
   // `maxWaitMicros <= 0` this will check if the LocalRunner is completed and

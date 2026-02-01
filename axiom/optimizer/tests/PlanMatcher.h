@@ -282,6 +282,10 @@ class PlanMatcherBuilder {
   /// Matches any LocalMerge node.
   PlanMatcherBuilder& localMerge();
 
+  /// Matches any PartitionedOutput node.
+  [[deprecated("Use shuffle() with AXIOM_ASSERT_DISTRIBUTED_PLAN instead")]]
+  PlanMatcherBuilder& partitionedOutput();
+
   /// Matches any Exchange node.
   [[deprecated("Use shuffle() with AXIOM_ASSERT_DISTRIBUTED_PLAN instead")]]
   PlanMatcherBuilder& exchange();
@@ -329,6 +333,8 @@ class PlanMatcherBuilder {
 
   /// Matches any TableWrite node.
   PlanMatcherBuilder& tableWrite();
+
+  PlanMatcherBuilder& window();
 
   /// Builds and returns the constructed PlanMatcher.
   /// @throws VeloxUserError if matcher is empty.

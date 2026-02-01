@@ -16,7 +16,6 @@
 
 #include "axiom/cli/SqlQueryRunner.h"
 #include <folly/system/HardwareConcurrency.h>
-#include "axiom/connectors/SchemaResolver.h"
 #include "axiom/logical_plan/LogicalPlanDotPrinter.h"
 #include "axiom/logical_plan/PlanPrinter.h"
 #include "axiom/optimizer/ConstantExprEvaluator.h"
@@ -222,10 +221,7 @@ SqlQueryRunner::SqlResult SqlQueryRunner::run(
     const auto* ctas = sqlStatement.as<presto::CreateTableAsSelectStatement>();
     auto table = createTable(*ctas);
 
-    auto schema = std::make_shared<connector::SchemaResolver>();
-    schema->setTargetTable(ctas->connectorId(), table);
-
-    return {.results = runLogicalPlan(ctas->plan(), options, schema)};
+    return {.results = runLogicalPlan(ctas->plan(), options)};
   }
 
   if (sqlStatement.isInsert()) {
@@ -367,10 +363,7 @@ optimizer::PlanAndStats SqlQueryRunner::optimize(
     const RunOptions& options,
     const std::function<bool(const optimizer::DerivedTable&)>&
         checkDerivedTable,
-    const std::function<bool(const optimizer::RelationOp&)>& checkBestPlan,
-    std::shared_ptr<facebook::axiom::connector::SchemaResolver> schemaResolver
-
-) {
+    const std::function<bool(const optimizer::RelationOp&)>& checkBestPlan) {
   runner::MultiFragmentPlan::Options opts;
   opts.numWorkers = options.numWorkers;
   opts.numDrivers = options.numDrivers;
@@ -388,14 +381,10 @@ optimizer::PlanAndStats SqlQueryRunner::optimize(
 
   auto session = std::make_shared<Session>(queryCtx->queryId());
   auto history = std::make_unique<optimizer::VeloxHistory>();
-  if (schemaResolver == nullptr) {
-    schemaResolver = std::make_shared<connector::SchemaResolver>();
-  }
 
   optimizer::Optimization optimization(
       session,
       *logicalPlan,
-      *schemaResolver,
       *history,
       queryCtx,
       evaluator,
@@ -434,12 +423,10 @@ std::shared_ptr<runner::LocalRunner> SqlQueryRunner::makeLocalRunner(
 
 std::vector<velox::RowVectorPtr> SqlQueryRunner::runLogicalPlan(
     const logical_plan::LogicalPlanNodePtr& logicalPlan,
-    const RunOptions& options,
-    std::shared_ptr<facebook::axiom::connector::SchemaResolver>
-        schemaResolver) {
+    const RunOptions& options) {
   auto queryCtx = newQuery(options);
-  auto planAndStats = optimize(
-      logicalPlan, queryCtx, options, nullptr, nullptr, schemaResolver);
+  auto planAndStats =
+      optimize(logicalPlan, queryCtx, options, nullptr, nullptr);
 
   auto runner = makeLocalRunner(planAndStats, queryCtx, options);
   SCOPE_EXIT {

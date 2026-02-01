@@ -30,7 +30,7 @@ namespace facebook::axiom::runner {
 /// the caller holds an owning reference to the runner.
 class Runner {
  public:
-  enum class State { kInitialized, kRunning, kFinished, kError, kCancelled };
+  enum class State { kInitialized, kRunning, kFinished, kError };
 
   AXIOM_DECLARE_EMBEDDED_ENUM_NAME(State);
 

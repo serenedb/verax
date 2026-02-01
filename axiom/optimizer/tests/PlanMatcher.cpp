@@ -1027,6 +1027,13 @@ PlanMatcherBuilder& PlanMatcherBuilder::localMerge() {
   return *this;
 }
 
+PlanMatcherBuilder& PlanMatcherBuilder::partitionedOutput() {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<PlanMatcherImpl<PartitionedOutputNode>>(
+      std::vector<std::shared_ptr<PlanMatcher>>{matcher_});
+  return *this;
+}
+
 PlanMatcherBuilder& PlanMatcherBuilder::exchange() {
   VELOX_USER_CHECK_NULL(matcher_);
   matcher_ = std::make_shared<PlanMatcherImpl<ExchangeNode>>();
@@ -1097,6 +1104,13 @@ PlanMatcherBuilder& PlanMatcherBuilder::orderBy(
 PlanMatcherBuilder& PlanMatcherBuilder::tableWrite() {
   VELOX_USER_CHECK_NOT_NULL(matcher_);
   matcher_ = std::make_shared<PlanMatcherImpl<TableWriteNode>>(
+      std::vector<std::shared_ptr<PlanMatcher>>{matcher_});
+  return *this;
+}
+
+PlanMatcherBuilder& PlanMatcherBuilder::window() {
+  VELOX_USER_CHECK_NOT_NULL(matcher_);
+  matcher_ = std::make_shared<PlanMatcherImpl<WindowNode>>(
       std::vector<std::shared_ptr<PlanMatcher>>{matcher_});
   return *this;
 }
