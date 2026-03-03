@@ -16,6 +16,7 @@
 
 #include "axiom/runner/LocalRunner.h"
 #include "axiom/connectors/ConnectorMetadata.h"
+#include "velox/common/memory/MemoryPool.h"
 #include "velox/common/time/Timer.h"
 #include "velox/exec/Exchange.h"
 #include "velox/exec/PlanNodeStats.h"
@@ -425,7 +426,14 @@ void LocalRunner::makeStages(
       gatherScans(fragment.fragment.planNode, scans);
 
       for (const auto& scan : scans) {
-        auto source = splitSourceForScan(/*session=*/nullptr, *scan);
+        auto connectorPool = params_.queryCtx->pool()->addAggregateChild(
+            fmt::format("split-connector.{}", scan->id()));
+        auto operatorPool = connectorPool->addLeafChild("split-operator");
+        auto session = std::make_shared<connector::ConnectorSession>(
+            params_.queryCtx->queryId(),
+            std::move(connectorPool),
+            std::move(operatorPool));
+        auto source = splitSourceForScan(session, *scan);
 
         std::vector<connector::SplitSource::SplitAndGroup> splits;
         int32_t splitIdx = 0;

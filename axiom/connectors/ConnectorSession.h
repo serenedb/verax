@@ -19,6 +19,10 @@
 #include <string>
 #include <utility>
 
+namespace facebook::velox::memory {
+class MemoryPool;
+} // namespace facebook::velox::memory
+
 namespace facebook::axiom::connector {
 
 /// Read-only query-specific information.
@@ -27,12 +31,32 @@ class ConnectorSession final {
   explicit ConnectorSession(std::string queryId)
       : queryId_{std::move(queryId)} {}
 
+  ConnectorSession(
+      std::string queryId,
+      std::shared_ptr<velox::memory::MemoryPool> connectorPool,
+      std::shared_ptr<velox::memory::MemoryPool> operatorPool)
+      : queryId_{std::move(queryId)},
+        connectorPool_{std::move(connectorPool)},
+        operatorPool_{std::move(operatorPool)} {}
+
   const std::string& queryId() const {
     return queryId_;
   }
 
+  /// Aggregate memory pool.
+  const std::shared_ptr<velox::memory::MemoryPool>& connectorPool() const {
+    return connectorPool_;
+  }
+
+  /// Leaf memory pool.
+  const std::shared_ptr<velox::memory::MemoryPool>& operatorPool() const {
+    return operatorPool_;
+  }
+
  private:
   const std::string queryId_;
+  std::shared_ptr<velox::memory::MemoryPool> connectorPool_;
+  std::shared_ptr<velox::memory::MemoryPool> operatorPool_;
 };
 
 using ConnectorSessionPtr = std::shared_ptr<ConnectorSession>;
