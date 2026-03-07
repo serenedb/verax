@@ -703,6 +703,7 @@ class TableWriteNode : public LogicalPlanNode {
       folly::F14FastMap<std::string, std::string> options = {});
 
   void setTable(connector::TablePtr table) const {
+    VELOX_CHECK_NULL(table_);
     table_ = std::move(table);
   }
 
