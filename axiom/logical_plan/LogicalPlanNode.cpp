@@ -399,9 +399,6 @@ TableWriteNode::TableWriteNode(
       columnNames_{std::move(columnNames)},
       columnExpressions_{std::move(columnExpressions)},
       options_{std::move(options)} {
-  if (writeKind_ != connector::WriteKind::kCreate) {
-    VELOX_USER_CHECK_NOT_NULL(table_);
-  }
   VELOX_USER_CHECK_EQ(columnNames_.size(), columnExpressions_.size());
 
   UniqueNameChecker::check(columnNames_);
