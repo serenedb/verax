@@ -2213,6 +2213,31 @@ PlanP Optimization::makeUnionPlan(
     inputNeedsShuffle.push_back(inputShuffle);
   }
 
+  // TODO(mbkkt) Fix this
+  // Ensure all UNION ALL inputs have the same output columns. The optimizer
+  // may independently prune columns per branch, causing mismatched output
+  // types in LocalPartitionNode. When branches disagree, project all of
+  // them to setDt->columns (the agreed-upon output of the UNION ALL).
+  if (inputs.size() > 1) {
+    bool needsAlign = false;
+    for (size_t i = 1; i < inputs.size(); ++i) {
+      if (inputs[i]->columns() != inputs[0]->columns()) {
+        needsAlign = true;
+        break;
+      }
+    }
+    if (needsAlign) {
+      const auto& targetColumns = setDt->columns;
+      ExprVector targetExprs(targetColumns.begin(), targetColumns.end());
+      for (auto& input : inputs) {
+        if (input->columns() != targetColumns) {
+          input = make<Project>(
+              input, ExprVector{targetExprs}, targetColumns, false);
+        }
+      }
+    }
+  }
+
   const bool isDistinct =
       setDt->setOp.value() == logical_plan::SetOperation::kUnion;
   if (isSingleWorker_) {
