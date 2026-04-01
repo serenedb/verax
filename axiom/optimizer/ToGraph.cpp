@@ -2228,7 +2228,7 @@ ExprCP ToGraph::processScalarSubquery(
     return literal;
   }
 
-  auto addJoin = [&](AddJoinArgs args) {
+  auto addJoin = [&](AddJoinArgs args) -> ExprCP {
     auto* edge = make<JoinEdge>(
         args.leftTable,
         subqueryDt,
@@ -2241,7 +2241,24 @@ ExprCP ToGraph::processScalarSubquery(
     }
     currentDt_->joins.push_back(edge);
     VELOX_CHECK_LE(1, subqueryDt->columns.size());
-    return subqueryDt->columns.back();
+    auto* resultColumn = subqueryDt->columns.back();
+    // count(*)/count(expr) returns 0 (not NULL) for empty input in PostgreSQL
+    // semantics. After the LEFT JOIN rewrite, when no rows match, the
+    // aggregation produces no group row, so the LEFT JOIN returns NULL instead
+    // of 0. Wrap with COALESCE to restore correct semantics.
+    if (subqueryDt->aggregation != nullptr) {
+      const auto& a = subqueryDt->aggregation->aggregates();
+      if (a.size() == 1 && a.back()->name() == toName("presto_count")) {
+        auto* zero = make<Literal>(
+            Value{toType(velox::BIGINT()), 1}, registerVariant(int64_t{0}));
+        return make<Call>(
+            toName(SpecialFormCallNames::kCoalesce),
+            resultColumn->value(),
+            ExprVector{resultColumn, zero},
+            FunctionSet{});
+      }
+    }
+    return resultColumn;
   };
 
   return processSubquery(leftTable, subqueryDt, addJoin);
